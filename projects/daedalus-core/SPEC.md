@@ -61,7 +61,8 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 ```
 
 ## Status
-- [ ] SPEC frozen
+- [x] SPEC frozen (Phase 0 scaffolding; interface sketch accepted for P0)
+- [x] Repo scaffolding (scripts, `daedalus-min`, probe 00-smoke)
 - [ ] Netlist ADT + stamp skeleton
 - [ ] Linear `.op`
 - [ ] First agent mutate loop

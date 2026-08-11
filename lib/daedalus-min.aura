@@ -1,0 +1,95 @@
+; lib/daedalus-min.aura — Phase 0 facade (scaffolding)
+;
+; (require "daedalus-min" all:)
+; Form order: export BEFORE require (#2766).
+;
+; Phase 0 ships only version + baseline metrology helpers.
+; Circuit modules (netlist / stamp / solve / …) land in Phase 1+.
+
+(export daed:min-version
+        daed:stats
+        daed:stats-reset!
+        daed:stats-ref
+        daed:stats-bump!
+        daed:stats-set!
+        daed:stats-alist
+        daed:alist-ref
+        daed:check-eq
+        daed:check-true
+        daed:escape-note!
+        daed:escape-count)
+
+; ── Version ──
+; 0 = Phase 0 scaffolding only (no circuit kernel yet)
+(define daed:min-version 0)
+
+; ── Alist helper ──
+(define (daed:alist-ref key lst default)
+  (let loop ((ys lst))
+    (cond ((null? ys) default)
+          ((not (pair? (car ys))) (loop (cdr ys)))
+          ((equal? (car (car ys)) key) (cdr (car ys)))
+          (else (loop (cdr ys))))))
+
+; ── Process-wide stats hash ──
+(define (daed:make-stats-hash)
+  (let ((h (hash)))
+    (hash-set! h "correctness_ok" 0)
+    (hash-set! h "correctness_fail" 0)
+    (hash-set! h "escapes" 0)
+    (hash-set! h "last_escape_reason" 0)
+    (hash-set! h "sim_runs" 0)
+    (hash-set! h "mutations" 0)
+    (hash-set! h "rollbacks" 0)
+    h))
+
+(define *daed-stats* (daed:make-stats-hash))
+
+(define (daed:stats)
+  *daed-stats*)
+
+(define (daed:stats-reset!)
+  (set! *daed-stats* (daed:make-stats-hash))
+  *daed-stats*)
+
+(define (daed:stats-ref key)
+  (let ((v (hash-ref *daed-stats* key 0)))
+    (if (number? v) v 0)))
+
+(define (daed:stats-bump! key)
+  (let ((n (+ 1 (daed:stats-ref key))))
+    (hash-set! *daed-stats* key n)
+    n))
+
+(define (daed:stats-set! key val)
+  (hash-set! *daed-stats* key val)
+  val)
+
+(define (daed:stats-alist)
+  (list (cons "correctness_ok" (daed:stats-ref "correctness_ok"))
+        (cons "correctness_fail" (daed:stats-ref "correctness_fail"))
+        (cons "escapes" (daed:stats-ref "escapes"))
+        (cons "last_escape_reason" (daed:stats-ref "last_escape_reason"))
+        (cons "sim_runs" (daed:stats-ref "sim_runs"))
+        (cons "mutations" (daed:stats-ref "mutations"))
+        (cons "rollbacks" (daed:stats-ref "rollbacks"))))
+
+; ── Checks ──
+(define (daed:check-eq actual expected)
+  (if (and (number? actual) (number? expected) (= actual expected))
+    (begin (daed:stats-bump! "correctness_ok") #t)
+    (begin (daed:stats-bump! "correctness_fail") #f)))
+
+(define (daed:check-true flag)
+  (if flag
+    (begin (daed:stats-bump! "correctness_ok") #t)
+    (begin (daed:stats-bump! "correctness_fail") #f)))
+
+; ── Escape metering (record every leave from V_A on critical path) ──
+(define (daed:escape-note! reason-tag)
+  (daed:stats-bump! "escapes")
+  (daed:stats-set! "last_escape_reason" reason-tag)
+  reason-tag)
+
+(define (daed:escape-count)
+  (daed:stats-ref "escapes"))

@@ -1,0 +1,18 @@
+# Build / local
+build/
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store
+
+# Aura / local env
+.env
+.env.*
+*.log
+
+# Editor / OS
+*~
+*.swp
+.idea/
+.vscode/

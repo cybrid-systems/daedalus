@@ -158,22 +158,29 @@ Full BSIM, commercial-grade sparse solvers, schematic capture UI, mixed-signal c
 ```
 daedalus/
 ├── README.md
-├── lib/                      # pure-Aura core (netlist, stamp, solve, probe …)
-├── examples/                 # denseness probes 01…
+├── lib/                      # pure-Aura core (daedalus-min; netlist/stamp/… later)
+├── examples/                 # denseness probes 00…
 ├── projects/
 │   └── daedalus-core/        # main evolvable project (SPEC.md + code)
-├── tests/
-├── scripts/
+├── scripts/                  # run-aura, run-all, check-structure
 ├── notes/                    # denseness-report, escape-log, design
 └── prompts/
 ```
 
-## Quick Start (once Aura sibling is available)
+## Quick Start
+
+Requires a local Aura binary (default sibling `../aura-grok/build/aura`).
 
 ```bash
-source ./scripts/env.sh
-./scripts/run-aura.sh examples/01-voltage-divider.aura
-./scripts/project-evolve.sh projects/daedalus-core
+./scripts/check-structure.sh
+./scripts/run-aura.sh examples/00-smoke/main.aura
+./scripts/run-all.sh
+```
+
+Phase 1+ circuit probes (planned):
+
+```bash
+./scripts/run-aura.sh examples/01-voltage-divider/main.aura
 ```
 
 ## Relation to Unify

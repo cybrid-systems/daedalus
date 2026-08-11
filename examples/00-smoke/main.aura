@@ -1,0 +1,74 @@
+; examples/00-smoke/main.aura
+;
+; Phase 0 denseness probe — host + lib load only.
+; No circuit simulation, no mutation. Escape count must be 0.
+;
+; Axes: scaffolding (lib require, metrology helpers)
+;
+; Run: ./scripts/run-aura.sh examples/00-smoke/main.aura
+;
+; Binding note: prefer let* over internal define for dependent values
+; (host internal-define behaves like simultaneous letrec).
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 00-smoke: host + lib scaffolding ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(newline)
+
+; ── 1. Version is Phase 0 ──
+(let* ((ver-ok (daed:check-eq daed:min-version 0)))
+  (display "version-ok=")
+  (display ver-ok)
+  (newline)
+
+  ; ── 2. check-eq / check-true baseline ──
+  (let* ((eq-ok (daed:check-eq (+ 1 2) 3))
+         (true-ok (daed:check-true #t))
+         (escapes (daed:escape-count))
+         (esc-ok (daed:check-eq escapes 0))
+         (fail-count (daed:stats-ref "correctness_fail"))
+         (ok-count (daed:stats-ref "correctness_ok")))
+    (display "eq-ok=")
+    (display eq-ok)
+    (display " true-ok=")
+    (display true-ok)
+    (display " escapes=")
+    (display escapes)
+    (newline)
+    (display "stats: ")
+    (write (daed:stats-alist))
+    (newline)
+
+    (let ((all-ok
+            (and ver-ok eq-ok true-ok esc-ok
+                 (= fail-count 0)
+                 (>= ok-count 4))))
+      (if all-ok
+        (begin
+          (display "PASS: host + daedalus-min load (escapes=0)")
+          (newline)
+          (display "RESULT pass example=00-smoke escapes=0")
+          (newline))
+        (begin
+          (display "FAIL: Phase 0 smoke probe")
+          (newline)
+          (display "RESULT fail example=00-smoke")
+          (newline)
+          (display "  ver-ok=")
+          (display ver-ok)
+          (display " eq-ok=")
+          (display eq-ok)
+          (display " true-ok=")
+          (display true-ok)
+          (display " esc-ok=")
+          (display esc-ok)
+          (display " ok-count=")
+          (display ok-count)
+          (display " fail-count=")
+          (display fail-count)
+          (newline))))))
