@@ -1,0 +1,68 @@
+# SPEC — daedalus-core
+
+## Goal
+
+Implement a **minimally complete, agent-evolvable SPICE-style circuit simulation core** on Aura, serving as the concrete denseness probe for the Daedalus span.
+
+## P0 Requirements
+
+### Netlist
+- Nodes identified by integer or symbol (0 = GND)
+- Components: at least `R`, `C`, `L`, independent `V` / `I`
+- Representation is a FlatAST-friendly structure that supports `mutate:rebind`, `mutate:splice`, `mutate:replace-subtree`
+- Topological integrity must be preserved across mutations (no dangling nodes)
+
+### Analyses
+- `.op` — DC operating point (required)
+- `.tran` — fixed-step transient (required)
+- Results returned as queryable structures (node voltages, time series)
+
+### Solver (Hephaestus-style)
+- Modified Nodal Analysis (MNA) stamping
+- Newton-Raphson for nonlinear systems (linear first is acceptable)
+- Critical numerical paths may use metered escapes; all such escapes must appear in the escape log
+
+### Agent Loop (Aether-style)
+```
+load → simulate → observe (voltages, residual, convergence)
+     → decide → safe-mutate → re-simulate → verify → rollback-if-needed
+```
+Must use `ast:snapshot` / `ast:restore`.
+
+### Denseness Metrics
+- escape rate
+- rollback success rate
+- post-mutation correctness
+- pure-Aura fraction of the hot path
+
+## Success Criteria (Phase 1)
+1. Voltage divider and RC low-pass produce correct `.op` / `.tran` results
+2. Agent mutation of a resistor value yields the expected new voltages
+3. ≥ 3 denseness probes pass
+4. No unlogged critical escapes
+
+## Non-Goals (P0)
+Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-signal.
+
+## Interface Sketch
+```scheme
+(define ckt
+  (circuit "divider"
+    (V "vin" 1 0 5.0)
+    (R "r1" 1 2 1e3)
+    (R "r2" 2 0 2e3)))
+
+(define res (simulate ckt '(.op)))
+;; → (hash 'v1 5.0 'v2 ≈3.333)
+
+(ast:snapshot "pre")
+;; mutate parameter or topology
+(simulate ckt '(.op))
+```
+
+## Status
+- [ ] SPEC frozen
+- [ ] Netlist ADT + stamp skeleton
+- [ ] Linear `.op`
+- [ ] First agent mutate loop
+- [ ] denseness probe 01
