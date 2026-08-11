@@ -183,6 +183,12 @@ Phase 1 linear `.op` (voltage divider):
 ./scripts/run-aura.sh examples/01-voltage-divider/main.aura
 ```
 
+Phase 2 fixed-step `.tran` (RC low-pass):
+
+```bash
+./scripts/run-aura.sh examples/02-rc-lowpass/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

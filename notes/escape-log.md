@@ -15,6 +15,11 @@ No leave from \(V_A\). Scaffolding and metrology helpers are pure Aura.
 No leave from \(V_A\). Linear MNA stamp + dense GE (`.op`) are pure Aura.
 (Historical: temporary `daed:safe-div` for aura#2940 was pure Aura, not an escape; removed after host fix.)
 
+## Phase 2
+
+No leave from \(V_A\). Fixed-step Backward Euler companions (C/L), current sources, and
+`.tran` time-stepping are pure Aura.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

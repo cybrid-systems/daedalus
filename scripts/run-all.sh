@@ -7,7 +7,8 @@ cd "$ROOT"
 PROBES=(
   00-smoke
   01-voltage-divider
-  # Phase 2+: 02-rc-lowpass …
+  02-rc-lowpass
+  # Phase 3+: 03-mutate-resistor …
 )
 
 pass=0

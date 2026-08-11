@@ -31,13 +31,14 @@ Primary objects under test:
 
 ## Current Status
 
-**Phase 0–1 landed:**
+**Phase 0–2 landed:**
 - Scaffolding: scripts, denseness notes, `00-smoke`
-- Circuit kernel: `netlist` / `stamp` / `solve` / `probe` (`daed:min-version=1`)
+- Circuit kernel: `netlist` / `stamp` / `solve` / `tran` / `probe` (`daed:min-version=2`)
 - Probe `01-voltage-divider` — linear `.op`, \(v_2=10/3\), escapes=0
-- Solver is clean post aura#2940/#2941: native `/`, sci literals (`1e3`, `1e-12`); no `safe-div`
+- Probe `02-rc-lowpass` — `.op` + fixed-step BE `.tran`, analytic RC checks, escapes=0
+- Solver: native `/`, sci literals; `.tran` takes **integer** `nsteps`
 
-**Next (Phase 2):** `C`/`L` + fixed-step `.tran` + `02-rc-lowpass`.
+**Next (Phase 3):** parameter mutate + snapshot/rollback + `03-mutate-resistor`.
 
 ## When generating or reviewing code
 

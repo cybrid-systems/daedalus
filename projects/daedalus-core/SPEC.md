@@ -65,5 +65,7 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Repo scaffolding (scripts, `daedalus-min`, probe 00-smoke)
 - [x] Netlist ADT + stamp skeleton (`netlist.aura`, `stamp.aura`)
 - [x] Linear `.op` (`solve.aura`, `probe.aura`, denseness probe 01)
+- [x] Fixed-step `.tran` (C/L BE companions, `tran.aura`, denseness probe 02)
 - [ ] First agent mutate loop
 - [x] denseness probe 01
+- [x] denseness probe 02

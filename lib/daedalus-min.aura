@@ -1,4 +1,4 @@
-; lib/daedalus-min.aura — Phase 1 facade (linear .op)
+; lib/daedalus-min.aura — Phase 2 facade (linear .op + fixed-step .tran)
 ;
 ; (require "daedalus-min" all:)
 ; Form order: export BEFORE require (#2766).
@@ -14,24 +14,33 @@
         daed:check-eq
         daed:check-true
         daed:check-approx
+        daed:check-rel
         daed:escape-note!
         daed:escape-count
         ; netlist
         daed:netlist-version
-        daed:comp daed:R daed:V daed:circuit
+        daed:comp daed:R daed:C daed:L daed:V daed:I daed:circuit
         daed:ckt-name daed:ckt-comps
         daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2
         daed:comp-value daed:comp-set-value!
         daed:max-node daed:count-type daed:node-index
         daed:n-voltage-unknowns
+        daed:node-voltage daed:set-node-voltage!
         ; stamp
-        daed:stamp-version daed:mna-size daed:stamp-system
+        daed:stamp-version daed:mna-size daed:mna-size-tran
+        daed:stamp-system daed:stamp-system-tran
         daed:mat-ref daed:mat-set! daed:mat-add!
         daed:vec-ref daed:vec-set! daed:vec-add!
+        daed:stamp-G! daed:stamp-I!
         ; solve
         daed:solve-version daed:dense-solve!
         daed:simulate-op
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
+        ; tran
+        daed:tran-version
+        daed:make-tran-state daed:simulate-tran
+        daed:tran-ok? daed:tran-dt daed:tran-tstop daed:tran-nsteps
+        daed:tran-times daed:tran-series daed:tran-v daed:tran-v-at
         ; probe
         daed:probe-version daed:v daed:v-ground
         daed:check-voltage)
@@ -39,10 +48,11 @@
 (require "netlist" all:)
 (require "stamp" all:)
 (require "solve" all:)
+(require "tran" all:)
 (require "probe" all:)
 
-; 1 = Phase 1 linear .op (R, V)
-(define daed:min-version 1)
+; 2 = Phase 2 fixed-step .tran (C/L/I + BE companions)
+(define daed:min-version 2)
 
 ; ── Alist helper ──
 (define (daed:alist-ref key lst default)
@@ -106,9 +116,6 @@
     (begin (daed:stats-bump! "correctness_ok") #t)
     (begin (daed:stats-bump! "correctness_fail") #f)))
 
-; Stats-aware approximate equality (overrides probe boolean helper name
-; when loaded via daedalus-min — probe still exports the pure predicate
-; as the same name from its module; facade provides the metered form).
 (define (daed:check-approx actual expected tol)
   (if (and (number? actual)
            (number? expected)
@@ -116,6 +123,21 @@
            (< (abs (- actual expected)) tol))
     (begin (daed:stats-bump! "correctness_ok") #t)
     (begin (daed:stats-bump! "correctness_fail") #f)))
+
+; Stats-aware relative check
+(define (daed:check-rel actual expected tol floor-abs)
+  (if (daed:check-rel-raw actual expected tol floor-abs)
+    (begin (daed:stats-bump! "correctness_ok") #t)
+    (begin (daed:stats-bump! "correctness_fail") #f)))
+
+(define (daed:check-rel-raw actual expected tol floor-abs)
+  (and (number? actual)
+       (number? expected)
+       (number? tol)
+       (number? floor-abs)
+       (let ((den (abs expected)))
+         (let ((d (if (> den floor-abs) den floor-abs)))
+           (< (/ (abs (- actual expected)) d) tol)))))
 
 ; ── Escape metering ──
 (define (daed:escape-note! reason-tag)

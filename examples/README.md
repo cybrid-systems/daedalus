@@ -16,7 +16,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 |---|------|------|--------|
 | 00 | [smoke](00-smoke/) | scaffolding | **PASS** (Phase 0) |
 | 01 | [voltage-divider](01-voltage-divider/) | circuit `.op` | **PASS** (Phase 1) |
-| 02 | rc-lowpass | `.tran` | planned Phase 2 |
+| 02 | [rc-lowpass](02-rc-lowpass/) | `.op` + `.tran` | **PASS** (Phase 2) |
 | 03 | mutate-resistor | safe mutate + rollback | planned Phase 3 |
 | 05 | agent-autotune | O→D→M→V→R | planned Phase 4 |
 
@@ -26,6 +26,6 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 |-------|--------|--------|
 | **0** | 00 | Scaffolding: scripts, lib facade, smoke |
 | **1** | 01 | Linear MNA `.op` (R, V) |
-| **2** | 02 | Fixed-step `.tran` (C, L) |
+| **2** | 02 | Fixed-step BE `.tran` (C, L, I) |
 | **3** | 03+ | Parameter/topology mutate + snapshot |
 | **4** | 05 | Agent closed-loop denseness |

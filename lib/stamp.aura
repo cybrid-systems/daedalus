@@ -1,26 +1,38 @@
-; lib/stamp.aura — Modified Nodal Analysis stamping (Phase 1, linear)
+; lib/stamp.aura — Modified Nodal Analysis stamping (Phase 1–2)
 ;
 ; (require "stamp" all:)
 ;
-; Builds dense MNA system A x = b for R + independent V.
-; Matrix A is row-major flat vector of length N*N; b length N.
-; Unknowns: [v_1 … v_m | i_V0 … i_Vk]  (node 0 = GND fixed at 0).
+; DC (.op): R, V, I; C open; L short (0 V branch).
+; TRAN: same + Backward-Euler companion models for C and L.
+; Matrix A is row-major flat vector length N*N; b length N.
+; Unknowns: [v_1 … v_m | i_branch…]  (node 0 = GND).
 
 (export daed:stamp-version
         daed:mna-size
+        daed:mna-size-tran
         daed:stamp-system
+        daed:stamp-system-tran
         daed:mat-ref
         daed:mat-set!
         daed:mat-add!
         daed:vec-ref
         daed:vec-set!
-        daed:vec-add!)
+        daed:vec-add!
+        daed:stamp-G!
+        daed:stamp-I!)
 
 (require "netlist" all:)
 
-(define daed:stamp-version 1)
+(define daed:stamp-version 2)
 
+; DC system size: node voltages + V sources + L (treated as 0 V).
 (define (daed:mna-size comps)
+  (+ (daed:n-voltage-unknowns comps)
+     (daed:count-type comps "V")
+     (daed:count-type comps "L")))
+
+; TRAN system size: node voltages + V sources only (C/L are companion G).
+(define (daed:mna-size-tran comps)
   (+ (daed:n-voltage-unknowns comps)
      (daed:count-type comps "V")))
 
@@ -42,28 +54,43 @@
 (define (daed:vec-add! b i delta)
   (vector-set! b i (+ (vector-ref b i) delta)))
 
-; Stamp resistor between n1–n2 with resistance r (>0).
+; Conductance stamp between n1–n2 (G > 0).
+(define (daed:stamp-G! A n n1 n2 G)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:mat-add! A n i1 i1 G)
+      0)
+    (if (>= i2 0)
+      (daed:mat-add! A n i2 i2 G)
+      0)
+    (if (and (>= i1 0) (>= i2 0))
+      (begin
+        (daed:mat-add! A n i1 i2 (* -1.0 G))
+        (daed:mat-add! A n i2 i1 (* -1.0 G)))
+      0)
+    #t))
+
+; Resistor: G = 1/R
 (define (daed:stamp-R! A n n1 n2 r)
   (if (or (not (number? r)) (<= r 0.0))
     #f
-    (let ((G (/ 1.0 r))
-          (i1 (daed:node-index n1))
-          (i2 (daed:node-index n2)))
-      (if (>= i1 0)
-        (daed:mat-add! A n i1 i1 G)
-        0)
-      (if (>= i2 0)
-        (daed:mat-add! A n i2 i2 G)
-        0)
-      (if (and (>= i1 0) (>= i2 0))
-        (begin
-          (daed:mat-add! A n i1 i2 (* -1.0 G))
-          (daed:mat-add! A n i2 i1 (* -1.0 G)))
-        0)
-      #t)))
+    (daed:stamp-G! A n n1 n2 (/ 1.0 r))))
 
-; Stamp independent voltage source n1(+)–n2(-) = val.
-; vs-idx: column/row of branch-current unknown (already absolute index).
+; Independent current source: current leaves n1 into n2 (n1 → n2).
+; KCL: -I at n1, +I at n2 on RHS (sum leaving = 0 form with A v = b).
+(define (daed:stamp-I! b n n1 n2 I)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:vec-add! b i1 (* -1.0 I))
+      0)
+    (if (>= i2 0)
+      (daed:vec-add! b i2 I)
+      0)
+    #t))
+
+; Independent voltage source n1(+)–n2(-) = val; vs-idx is branch unknown.
 (define (daed:stamp-V! A b n n1 n2 val vs-idx)
   (let ((i1 (daed:node-index n1))
         (i2 (daed:node-index n2)))
@@ -80,12 +107,26 @@
     (daed:vec-add! b vs-idx val)
     #t))
 
-; Build (list N A b n-v) for linear DC MNA.
-; A, b are freshly allocated float vectors.
+; Inject branch current contribution on RHS: +Ieq at n1, -Ieq at n2
+; (for capacitor companion Geq*v_old).
+(define (daed:stamp-ieq! b n1 n2 Ieq)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:vec-add! b i1 Ieq)
+      0)
+    (if (>= i2 0)
+      (daed:vec-add! b i2 (* -1.0 Ieq))
+      0)
+    #t))
+
+; ── DC stamp ──
+; C open (skip). L short as 0 V voltage branch.
 (define (daed:stamp-system comps)
   (let ((n-v (daed:n-voltage-unknowns comps))
-        (n-vs (daed:count-type comps "V")))
-    (let ((N (+ n-v n-vs)))
+        (n-vs (daed:count-type comps "V"))
+        (n-L (daed:count-type comps "L")))
+    (let ((N (+ n-v n-vs n-L)))
       (if (<= N 0)
         (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
         (let ((A (make-vector (* N N) 0.0))
@@ -111,5 +152,79 @@
                                         (daed:comp-value c)
                                         vs-next)
                          (set! vs-next (+ vs-next 1))))
+                      ((equal? ty "I")
+                       (daed:stamp-I! b N
+                                      (daed:comp-n1 c)
+                                      (daed:comp-n2 c)
+                                      (daed:comp-value c)))
+                      ((equal? ty "L")
+                       ; DC short: 0 V between terminals
+                       (begin
+                         (daed:stamp-V! A b N
+                                        (daed:comp-n1 c)
+                                        (daed:comp-n2 c)
+                                        0.0
+                                        vs-next)
+                         (set! vs-next (+ vs-next 1))))
+                      ((equal? ty "C")
+                       ; DC open
+                       0)
+                      (else 0))))
+                (loop (cdr cs))))))))))
+
+; ── TRAN stamp (Backward Euler companions) ──
+; state: hash with "v" (vector by node id) and "iL" (hash name → current)
+(define (daed:stamp-system-tran comps h state)
+  (let ((n-v (daed:n-voltage-unknowns comps))
+        (n-vs (daed:count-type comps "V"))
+        (vprev (hash-ref state "v" (make-vector 1 0.0)))
+        (iL (hash-ref state "iL" (hash))))
+    (let ((N (+ n-v n-vs)))
+      (if (or (<= N 0) (not (number? h)) (<= h 0.0))
+        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+        (let ((A (make-vector (* N N) 0.0))
+              (b (make-vector N 0.0))
+              (vs-next n-v))
+          (let loop ((cs comps))
+            (if (null? cs)
+              (list N A b n-v)
+              (begin
+                (let ((c (car cs)))
+                  (let ((ty (daed:comp-type c))
+                        (n1 (daed:comp-n1 c))
+                        (n2 (daed:comp-n2 c))
+                        (val (daed:comp-value c)))
+                    (cond
+                      ((equal? ty "R")
+                       (daed:stamp-R! A N n1 n2 val))
+                      ((equal? ty "V")
+                       (begin
+                         (daed:stamp-V! A b N n1 n2 val vs-next)
+                         (set! vs-next (+ vs-next 1))))
+                      ((equal? ty "I")
+                       (daed:stamp-I! b N n1 n2 val))
+                      ((equal? ty "C")
+                       (if (and (number? val) (> val 0.0))
+                         (let ((Geq (/ val h))
+                               (vold (- (daed:node-voltage vprev n1)
+                                        (daed:node-voltage vprev n2))))
+                           (daed:stamp-G! A N n1 n2 Geq)
+                           (daed:stamp-ieq! b n1 n2 (* Geq vold)))
+                         0))
+                      ((equal? ty "L")
+                       (if (and (number? val) (> val 0.0))
+                         (let ((Geq (/ h val))
+                               (iold (hash-ref iL (daed:comp-name c) 0.0)))
+                           (daed:stamp-G! A N n1 n2 Geq)
+                           ; b: -iold at n1, +iold at n2
+                           (let ((i1 (daed:node-index n1))
+                                 (i2 (daed:node-index n2)))
+                             (if (>= i1 0)
+                               (daed:vec-add! b i1 (* -1.0 iold))
+                               0)
+                             (if (>= i2 0)
+                               (daed:vec-add! b i2 iold)
+                               0)))
+                         0))
                       (else 0))))
                 (loop (cdr cs))))))))))

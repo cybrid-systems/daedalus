@@ -1,0 +1,184 @@
+; lib/tran.aura — Fixed-step transient analysis (Phase 2)
+;
+; (require "tran" all:)
+;
+; Backward Euler, fixed dt, integer nsteps.
+; Initial node voltages and L currents default to 0 (zero-state).
+;
+; Host note: make-vector requires an integer length; floor() returns float,
+; so callers pass integer nsteps (not tstop-derived floor).
+
+(export daed:tran-version
+        daed:make-tran-state
+        daed:simulate-tran
+        daed:tran-ok?
+        daed:tran-dt
+        daed:tran-tstop
+        daed:tran-nsteps
+        daed:tran-times
+        daed:tran-series
+        daed:tran-v
+        daed:tran-v-at)
+
+(require "netlist" all:)
+(require "stamp" all:)
+(require "solve" all:)
+
+(define daed:tran-version 1)
+
+; Allocate zero-state: v[node]=0, iL[name]=0 for each L.
+(define (daed:make-tran-state comps)
+  (let ((m (daed:max-node comps))
+        (st (hash))
+        (iL (hash)))
+    (hash-set! st "v" (make-vector (+ m 1) 0.0))
+    (let loop ((cs comps))
+      (if (null? cs)
+        (begin
+          (hash-set! st "iL" iL)
+          st)
+        (begin
+          (if (equal? (daed:comp-type (car cs)) "L")
+            (hash-set! iL (daed:comp-name (car cs)) 0.0)
+            0)
+          (loop (cdr cs)))))))
+
+; Copy solution x (first n-v entries are node voltages) into state "v".
+(define (daed:update-state-voltages! state x n-v)
+  (let ((vvec (hash-ref state "v" (make-vector 1 0.0))))
+    (vector-set! vvec 0 0.0)
+    (let ((k 1))
+      (while (lambda () (<= k n-v))
+        (lambda ()
+          (if (< k (vector-length vvec))
+            (vector-set! vvec k (daed:vec-ref x (- k 1)))
+            0)
+          (set! k (+ k 1)))))
+    state))
+
+; i_L := (h/L)*v + i_L_old after a successful step.
+(define (daed:update-state-iL! comps state h)
+  (let ((vvec (hash-ref state "v" (make-vector 1 0.0)))
+        (iL (hash-ref state "iL" (hash))))
+    (let loop ((cs comps))
+      (if (null? cs)
+        state
+        (begin
+          (let ((c (car cs)))
+            (if (equal? (daed:comp-type c) "L")
+              (let ((Lval (daed:comp-value c)))
+                (if (and (number? Lval) (> Lval 0.0))
+                  (let ((n1 (daed:comp-n1 c))
+                        (n2 (daed:comp-n2 c))
+                        (name (daed:comp-name c)))
+                    (let ((v (- (daed:node-voltage vvec n1)
+                                (daed:node-voltage vvec n2)))
+                          (iold (hash-ref iL name 0.0)))
+                      (hash-set! iL name (+ (* (/ h Lval) v) iold))))
+                  0))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:record-step! series-by-node times t n-v state k)
+  (vector-set! times k t)
+  (let ((vvec (hash-ref state "v" (make-vector 1 0.0)))
+        (node 1))
+    (while (lambda () (<= node n-v))
+      (lambda ()
+        (let ((key (number->string node)))
+          (let ((wv (hash-ref series-by-node key #f)))
+            (if wv
+              (vector-set! wv k (daed:node-voltage vvec node))
+              0)))
+        (set! node (+ node 1)))))
+  #t)
+
+; Fixed-step .tran: nsteps is a non-negative integer.
+; Samples: t=0 plus nsteps ends → length nsteps+1.
+; Returns hash: ok, dt, tstop, nsteps, times, series, n_v, final
+(define (daed:simulate-tran ckt dt nsteps)
+  (let ((comps (daed:ckt-comps ckt))
+        (res (hash)))
+    (hash-set! res "dt" dt)
+    (if (or (not (number? dt)) (not (number? nsteps))
+            (<= dt 0.0) (< nsteps 0))
+      (begin
+        (hash-set! res "ok" #f)
+        (hash-set! res "tstop" 0.0)
+        (hash-set! res "nsteps" 0)
+        (hash-set! res "times" (make-vector 0 0.0))
+        (hash-set! res "series" (hash))
+        (hash-set! res "n_v" 0)
+        res)
+      (let ((n-v (daed:n-voltage-unknowns comps))
+            ; nsteps must be integer for make-vector; callers pass integer literals.
+            (ns nsteps))
+        (let ((nsamp (+ ns 1))
+              (tstop (* dt ns))
+              (state (daed:make-tran-state comps))
+              (times (make-vector (+ ns 1) 0.0))
+              (series (hash))
+              (ok #t))
+          (hash-set! res "tstop" tstop)
+          (let ((node 1))
+            (while (lambda () (<= node n-v))
+              (lambda ()
+                (hash-set! series (number->string node)
+                           (make-vector nsamp 0.0))
+                (set! node (+ node 1)))))
+          (daed:record-step! series times 0.0 n-v state 0)
+          (let ((k 1)
+                (t 0.0))
+            (while (lambda () (and ok (<= k ns)))
+              (lambda ()
+                (set! t (+ t dt))
+                (let ((sys (daed:stamp-system-tran comps dt state)))
+                  (let ((N (car sys))
+                        (A (car (cdr sys)))
+                        (b (car (cdr (cdr sys)))))
+                    (if (or (<= N 0) (not (daed:dense-solve! A b N)))
+                      (set! ok #f)
+                      (begin
+                        (daed:update-state-voltages! state b n-v)
+                        (daed:update-state-iL! comps state dt)
+                        (daed:record-step! series times t n-v state k)))))
+                (set! k (+ k 1)))))
+          (hash-set! res "ok" ok)
+          (hash-set! res "nsteps" ns)
+          (hash-set! res "times" times)
+          (hash-set! res "series" series)
+          (hash-set! res "n_v" n-v)
+          (hash-set! res "final" state)
+          res)))))
+
+(define (daed:tran-ok? res)
+  (hash-ref res "ok" #f))
+
+(define (daed:tran-dt res)
+  (hash-ref res "dt" 0.0))
+
+(define (daed:tran-tstop res)
+  (hash-ref res "tstop" 0.0))
+
+(define (daed:tran-nsteps res)
+  (hash-ref res "nsteps" 0))
+
+(define (daed:tran-times res)
+  (hash-ref res "times" (make-vector 0 0.0)))
+
+(define (daed:tran-series res node)
+  (let ((series (hash-ref res "series" (hash))))
+    (hash-ref series (number->string node) (make-vector 0 0.0))))
+
+(define (daed:tran-v-at res node k)
+  (let ((wv (daed:tran-series res node)))
+    (if (or (< k 0) (>= k (vector-length wv)))
+      0.0
+      (vector-ref wv k))))
+
+(define (daed:tran-v res node)
+  (let ((wv (daed:tran-series res node)))
+    (let ((n (vector-length wv)))
+      (if (<= n 0)
+        0.0
+        (vector-ref wv (- n 1))))))

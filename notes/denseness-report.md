@@ -1,8 +1,8 @@
 # Denseness Report — Daedalus
 
-**Date:** 2026-08-11  
-**Status:** **Phase 1 linear `.op`** — probes **00–01** PASS; pure-Aura MNA path, core \(E=0\).  
-**Judgment:** partial — circuit description + linear DC solve denseness holds for the divider probe; full \(S_{\mathrm{Daedalus}}\) claim still requires `.tran`, mutate, and agent loop.
+**Date:** 2026-08-12  
+**Status:** **Phase 2 fixed-step `.tran`** — probes **00–02** PASS; pure-Aura MNA + BE companions, core \(E=0\).  
+**Judgment:** partial — linear DC and fixed-step transient denseness hold; full \(S_{\mathrm{Daedalus}}\) claim still requires mutate + agent loop.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
 **Prior spans:** Aether / Hephaestus / Hermes / Prometheus denseness reports (siblings)
@@ -34,26 +34,32 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 |-------|------|--------|------------|------------|
 | [00](../examples/00-smoke/) | scaffolding | **PASS** | 0 | 0 |
 | [01](../examples/01-voltage-divider/) | circuit `.op` | **PASS** | 0 | 0 |
-| 02 rc-lowpass | `.tran` | planned | — | — |
+| [02](../examples/02-rc-lowpass/) | `.op` + `.tran` | **PASS** | 0 | 0 |
 | 03 mutate-resistor | Aether compose | planned | — | — |
 
 ### Phase 1 narrative
 
 - `netlist` / `stamp` / `solve` / `probe` implement linear MNA in pure Aura.
 - Voltage divider analytic check: \(v_2 = 5 \cdot \frac{2000}{3000} = \frac{10}{3}\).
-- Dense GE uses native `/` and sci literals after [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) / [#2941](https://github.com/cybrid-systems/aura/issues/2941) (host residuals closed).
+- Dense GE uses native `/` and sci literals after [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) / [#2941](https://github.com/cybrid-systems/aura/issues/2941).
+
+### Phase 2 narrative
+
+- Components `C`, `L`, `I`; DC treats C as open, L as 0 V short.
+- Fixed-step Backward Euler companions for C/L; `daed:simulate-tran` with **integer** `nsteps`.
+- RC low-pass: `.op` \(v_2=5\); `.tran` \(v_2(\tau)\) and \(v_2(5\tau)\) within relative tolerance of \(5(1-e^{-t/\tau})\).
 
 ---
 
 ## Judgment
 
-> On the **linear `.op` slice** of \(S_{\mathrm{Daedalus}}\), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\)).  
-> Full span claim waits for transient, safe mutation, and agent closed-loop probes.
+> On the **linear `.op` + fixed-step `.tran` slice** of \(S_{\mathrm{Daedalus}}\), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\)).  
+> Full span claim waits for safe mutation and agent closed-loop probes (≥3 probes already pass: 00–02).
 
 ---
 
 ## Next
 
-1. Phase 2: `C`/`L` + fixed-step `.tran` + probe **02-rc-lowpass**
-2. Phase 3: parameter mutate + snapshot/rollback
+1. Phase 3: parameter mutate + snapshot/rollback + probe **03**
+2. Phase 4: agent auto-tune closed loop
 3. Keep escapes in [escape-log.md](escape-log.md); host issues in [host-residuals.md](host-residuals.md)

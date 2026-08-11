@@ -1,0 +1,158 @@
+; examples/02-rc-lowpass/main.aura
+;
+; Phase 2 denseness probe — fixed-step .tran (Backward Euler) + .op.
+; Series RC low-pass: Vin=5 V step, R=1 kΩ, C=1 µF → τ=1 ms
+;
+;   vin ── R ── n2 ── C ── GND
+;
+; Analytic (zero-state step): v2(t) = 5*(1 - exp(-t/τ))
+; DC .op (C open): v2 = 5 V
+;
+; Axes: circuit kernel (.op + .tran companions) + metrology
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/02-rc-lowpass/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 02-rc-lowpass: .op + fixed-step .tran denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " stamp=")
+(display daed:stamp-version)
+(display " solve=")
+(display daed:solve-version)
+(display " tran=")
+(display daed:tran-version)
+(newline)
+
+(define Rval 1e3)
+(define Cval 1e-6)
+(define Vin 5.0)
+(define tau (* Rval Cval))
+
+(define ckt
+  (daed:circuit "rc-lp"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval))))
+
+(display "tau=")
+(display tau)
+(display " s  (RC low-pass)")
+(newline)
+
+; ── 1. DC .op: capacitor open → v2 = Vin ──
+(define op (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+
+(let* ((op-ok-flag (daed:op-ok? op))
+       (v1-op (daed:v op 1))
+       (v2-op (daed:v op 2))
+       (op-flag (daed:check-true op-ok-flag))
+       (v1-op-ok (daed:check-approx v1-op Vin 1e-6))
+       (v2-op-ok (daed:check-approx v2-op Vin 1e-3)))
+  (display ".op ok=")
+  (display op-ok-flag)
+  (display " v1=")
+  (display v1-op)
+  (display " v2=")
+  (display v2-op)
+  (display " (want ")
+  (display Vin)
+  (display ")")
+  (newline)
+
+  ; ── 2. .tran fixed-step ──
+  ; dt = τ/100, nsteps = 500 → tstop = 5τ (integer nsteps for make-vector)
+  (let* ((nsteps 500)
+         (dt (/ tau 100.0))
+         (tr (daed:simulate-tran ckt dt nsteps)))
+    (daed:stats-bump! "sim_runs")
+    (let* ((tr-ok-flag (daed:tran-ok? tr))
+           (got-steps (daed:tran-nsteps tr))
+           (tr-flag (daed:check-true tr-ok-flag))
+           (steps-ok (daed:check-eq got-steps 500))
+           ; sample at t = τ → step index 100
+           (k-tau 100)
+           (v-tau (daed:tran-v-at tr 2 k-tau))
+           (want-tau (* Vin (- 1.0 (exp -1.0))))
+           (tau-ok (daed:check-rel v-tau want-tau 0.05 1e-6))
+           ; final t = 5τ
+           (v-end (daed:tran-v tr 2))
+           (want-end (* Vin (- 1.0 (exp -5.0))))
+           (end-ok (daed:check-rel v-end want-end 0.02 1e-6))
+           ; IC
+           (v0 (daed:tran-v-at tr 2 0))
+           (ic-ok (daed:check-approx v0 0.0 1e-9))
+           (escapes (daed:escape-count))
+           (esc-ok (daed:check-eq escapes 0)))
+      (display ".tran ok=")
+      (display tr-ok-flag)
+      (display " nsteps=")
+      (display got-steps)
+      (display " dt=")
+      (display dt)
+      (display " tstop=")
+      (display (daed:tran-tstop tr))
+      (newline)
+      (display "v2(0)=")
+      (display v0)
+      (display " v2(tau)=")
+      (display v-tau)
+      (display " want=")
+      (display want-tau)
+      (newline)
+      (display "v2(5tau)=")
+      (display v-end)
+      (display " want=")
+      (display want-end)
+      (newline)
+      (display "ic-ok=")
+      (display ic-ok)
+      (display " tau-ok=")
+      (display tau-ok)
+      (display " end-ok=")
+      (display end-ok)
+      (display " escapes=")
+      (display escapes)
+      (newline)
+      (display "stats: ")
+      (write (daed:stats-alist))
+      (newline)
+
+      (let ((all-ok
+              (and op-flag v1-op-ok v2-op-ok
+                   tr-flag steps-ok ic-ok tau-ok end-ok esc-ok
+                   (= (daed:stats-ref "correctness_fail") 0)
+                   (>= (daed:stats-ref "correctness_ok") 8)
+                   (>= (daed:stats-ref "sim_runs") 2))))
+        (if all-ok
+          (begin
+            (display "PASS: RC low-pass .op + .tran (escapes=0)")
+            (newline)
+            (display "RESULT pass example=02-rc-lowpass escapes=0")
+            (newline))
+          (begin
+            (display "FAIL: RC low-pass denseness probe")
+            (newline)
+            (display "RESULT fail example=02-rc-lowpass")
+            (newline)
+            (display "  op-flag=")
+            (display op-flag)
+            (display " v2-op-ok=")
+            (display v2-op-ok)
+            (display " tr-flag=")
+            (display tr-flag)
+            (display " tau-ok=")
+            (display tau-ok)
+            (display " end-ok=")
+            (display end-ok)
+            (display " esc-ok=")
+            (display esc-ok)
+            (newline)))))))

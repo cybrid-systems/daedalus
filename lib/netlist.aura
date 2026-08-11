@@ -1,14 +1,17 @@
-; lib/netlist.aura — Circuit / Node / Component ADT (Phase 1)
+; lib/netlist.aura — Circuit / Node / Component ADT (Phase 1–2)
 ;
 ; (require "netlist" all:)
 ;
 ; FlatAST-friendly hashes + component lists. Node 0 is GND.
-; P0 components: R (resistor), V (independent voltage source).
+; Components: R, C, L, independent V / I.
 
 (export daed:netlist-version
         daed:comp
         daed:R
+        daed:C
+        daed:L
         daed:V
+        daed:I
         daed:circuit
         daed:ckt-name
         daed:ckt-comps
@@ -21,14 +24,16 @@
         daed:max-node
         daed:count-type
         daed:node-index
-        daed:n-voltage-unknowns)
+        daed:n-voltage-unknowns
+        daed:node-voltage
+        daed:set-node-voltage!)
 
-(define daed:netlist-version 1)
+(define daed:netlist-version 2)
 
 ; ── Component constructors ──
-; type: string "R" | "V" | …
+; type: "R" | "C" | "L" | "V" | "I"
 ; n1, n2: integer node ids (0 = GND)
-; value: number (ohms or volts)
+; value: ohms | farads | henries | volts | amps
 
 (define (daed:comp type name n1 n2 value)
   (let ((h (hash)))
@@ -42,8 +47,17 @@
 (define (daed:R name n1 n2 value)
   (daed:comp "R" name n1 n2 value))
 
+(define (daed:C name n1 n2 value)
+  (daed:comp "C" name n1 n2 value))
+
+(define (daed:L name n1 n2 value)
+  (daed:comp "L" name n1 n2 value))
+
 (define (daed:V name n1 n2 value)
   (daed:comp "V" name n1 n2 value))
+
+(define (daed:I name n1 n2 value)
+  (daed:comp "I" name n1 n2 value))
 
 (define (daed:circuit name comps)
   (let ((h (hash)))
@@ -76,7 +90,7 @@
   (hash-set! c "value" value)
   c)
 
-; Highest node id appearing in the netlist (GND=0 counts if present).
+; Highest node id appearing in the netlist.
 (define (daed:max-node comps)
   (let ((m 0))
     (let loop ((cs comps))
@@ -102,8 +116,7 @@
           (loop (cdr cs)))))))
 
 ; Map circuit node id → MNA voltage unknown index.
-; Node 0 (GND) → -1 (not an unknown). Node k>0 → k-1.
-; Assumes nodes are densely numbered 0..max-node.
+; Node 0 (GND) → -1. Node k>0 → k-1.
 (define (daed:node-index node)
   (if (or (not (number? node)) (<= node 0))
     -1
@@ -111,3 +124,17 @@
 
 (define (daed:n-voltage-unknowns comps)
   (daed:max-node comps))
+
+; Read / write node voltage in a state vector (index = node id, 0 always 0).
+(define (daed:node-voltage vvec node)
+  (if (or (not (number? node)) (< node 0))
+    0.0
+    (if (>= node (vector-length vvec))
+      0.0
+      (vector-ref vvec node))))
+
+(define (daed:set-node-voltage! vvec node val)
+  (if (and (number? node) (> node 0) (< node (vector-length vvec)))
+    (vector-set! vvec node val)
+    0)
+  vvec)
