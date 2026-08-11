@@ -13,7 +13,7 @@ No leave from \(V_A\). Scaffolding and metrology helpers are pure Aura.
 ## Phase 1
 
 No leave from \(V_A\). Linear MNA stamp + dense GE (`.op`) are pure Aura.
-`daed:safe-div` is a pure-Aura workaround for a host float residual (see `host-residuals.md`), not an escape from \(V_A\).
+(Historical: temporary `daed:safe-div` for aura#2940 was pure Aura, not an escape; removed after host fix.)
 
 ## Convention
 

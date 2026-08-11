@@ -17,8 +17,8 @@
 (define ckt
   (daed:circuit "divider"
     (list (daed:V "vin" 1 0 5.0)
-          (daed:R "r1" 1 2 1000.0)
-          (daed:R "r2" 2 0 2000.0))))
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
 
 (define res (daed:simulate-op ckt))
 (daed:v res 2)  ; ≈ 3.333
@@ -37,5 +37,5 @@ Host resolution: `scripts/run-aura.sh` sets `AURA_PATH` to `../aura-grok/lib:./l
 
 - Form order: `(export …)` before `(require …)` when needed (#2766).
 - Prefix: `daed:` for public bindings.
-- Prefer `daed:safe-div` over raw `/` on solver paths (host float residual).
+- Solver uses native `/` and scientific literals (post aura#2940 / #2941).
 - Every critical-path leave from \(V_A\) → `notes/escape-log.md`.

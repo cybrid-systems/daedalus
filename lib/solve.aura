@@ -5,12 +5,10 @@
 ; Gaussian elimination with partial pivoting on dense MNA.
 ; Pure Aura; no FFI (escape count 0 on this path).
 ;
-; Host residual: naive (/ a b) can return 0 for legitimate small float
-; operands after intermediate arithmetic (see notes/host-residuals.md).
-; All critical divisions go through daed:safe-div.
+; Post aura#2940: plain (/) is correct on small post-arithmetic floats.
+; Post aura#2941: scientific literals (1e-12) are accepted.
 
 (export daed:solve-version
-        daed:safe-div
         daed:dense-solve!
         daed:simulate-op
         daed:op-ok?
@@ -22,22 +20,11 @@
 (require "netlist" all:)
 (require "stamp" all:)
 
-(define daed:solve-version 1)
+; 2 = post-#2940/#2941 cleanup (native / + sci literals; no safe-div)
+(define daed:solve-version 2)
 
-; Scale numerator/denominator so |den*scale| >= 1 before dividing.
-; Works around host float-div footgun on small post-arithmetic values.
-(define (daed:safe-div num den)
-  (if (or (not (number? num)) (not (number? den)))
-    0.0
-    (if (< (abs den) 0.000000000001)
-      0.0
-      (let ((scale 1.0))
-        (while (lambda ()
-                 (and (< (* (abs den) scale) 1.0)
-                      (< scale 1000000000000.0)))
-          (lambda ()
-            (set! scale (* scale 1024.0))))
-        (/ (* num scale) (* den scale))))))
+; Pivot / singularity floor for dense GE
+(define daed:ge-eps 1e-12)
 
 ; Swap rows r1 and r2 in n×n matrix A and rhs b.
 (define (daed:swap-rows! A b n r1 r2)
@@ -74,7 +61,7 @@
                   (begin (set! best av) (set! piv r))
                   0))
               (set! r (+ r 1))))
-          (if (< best 0.000000000001)
+          (if (< best daed:ge-eps)
             (set! ok #f)
             (begin
               (daed:swap-rows! A b n col piv)
@@ -83,7 +70,7 @@
                 (while (lambda () (< i n))
                   (lambda ()
                     (let ((diag (daed:mat-ref A n col col)))
-                      (let ((factor (daed:safe-div (daed:mat-ref A n i col) diag)))
+                      (let ((factor (/ (daed:mat-ref A n i col) diag)))
                         (daed:mat-set! A n i col 0.0)
                         (let ((j (+ col 1)))
                           (while (lambda () (< j n))
@@ -112,9 +99,9 @@
                                     (daed:vec-ref b j))))
                     (set! j (+ j 1))))
                 (let ((diag (daed:mat-ref A n i i)))
-                  (if (< (abs diag) 0.000000000001)
+                  (if (< (abs diag) daed:ge-eps)
                     (set! ok #f)
-                    (daed:vec-set! b i (daed:safe-div s diag)))))
+                    (daed:vec-set! b i (/ s diag)))))
               (set! i (- i 1)))))
         ok))))
 

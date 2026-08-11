@@ -35,7 +35,7 @@ Primary objects under test:
 - Scaffolding: scripts, denseness notes, `00-smoke`
 - Circuit kernel: `netlist` / `stamp` / `solve` / `probe` (`daed:min-version=1`)
 - Probe `01-voltage-divider` — linear `.op`, \(v_2=10/3\), escapes=0
-- Use `daed:safe-div` on solver paths (host float residual; still pure Aura)
+- Solver is clean post aura#2940/#2941: native `/`, sci literals (`1e3`, `1e-12`); no `safe-div`
 
 **Next (Phase 2):** `C`/`L` + fixed-step `.tran` + `02-rc-lowpass`.
 

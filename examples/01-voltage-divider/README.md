@@ -3,9 +3,9 @@
 **Phase 1** denseness probe: linear MNA DC operating point (`.op`).
 
 ```
-vin (5 V) ── R1 (1 kΩ) ── n2 ── R2 (2 kΩ) ── GND
-                n1              │
-                               v2 ≈ 3.333 V
+vin (5 V) ── R1 (1e3 Ω) ── n2 ── R2 (2e3 Ω) ── GND
+                 n1              │
+                                v2 ≈ 3.333 V
 ```
 
 | Item | Value |

@@ -28,8 +28,8 @@
 (define ckt
   (daed:circuit "divider"
     (list (daed:V "vin" 1 0 5.0)
-          (daed:R "r1" 1 2 1000.0)
-          (daed:R "r2" 2 0 2000.0))))
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
 
 (display "circuit=")
 (display (daed:ckt-name ckt))
@@ -51,9 +51,9 @@
        (v0 (daed:v res 0))
        (want-v2 (/ 10.0 3.0))
        (ok-flag (daed:check-true ok))
-       (v0-ok (daed:check-approx v0 0.0 0.0001))
-       (v1-ok (daed:check-approx v1 5.0 0.0001))
-       (v2-ok (daed:check-approx v2 want-v2 0.001))
+       (v0-ok (daed:check-approx v0 0.0 1e-4))
+       (v1-ok (daed:check-approx v1 5.0 1e-4))
+       (v2-ok (daed:check-approx v2 want-v2 1e-3))
        (escapes (daed:escape-count))
        (esc-ok (daed:check-eq escapes 0)))
   (display "op-ok=")

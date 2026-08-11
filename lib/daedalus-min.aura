@@ -29,7 +29,7 @@
         daed:mat-ref daed:mat-set! daed:mat-add!
         daed:vec-ref daed:vec-set! daed:vec-add!
         ; solve
-        daed:solve-version daed:safe-div daed:dense-solve!
+        daed:solve-version daed:dense-solve!
         daed:simulate-op
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
         ; probe

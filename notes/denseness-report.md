@@ -41,7 +41,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 
 - `netlist` / `stamp` / `solve` / `probe` implement linear MNA in pure Aura.
 - Voltage divider analytic check: \(v_2 = 5 \cdot \frac{2000}{3000} = \frac{10}{3}\).
-- Solver uses `daed:safe-div` (host residual workaround, still pure Aura — not an escape).
+- Dense GE uses native `/` and sci literals after [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) / [#2941](https://github.com/cybrid-systems/aura/issues/2941) (host residuals closed).
 
 ---
 

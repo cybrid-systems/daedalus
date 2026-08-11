@@ -3,13 +3,13 @@
 Issues that are packaging / host / environment related, **not** denseness failures
 on \(S_{\mathrm{Daedalus}}\).
 
-| Date | Issue | Upstream | Notes |
-|------|-------|----------|-------|
-| 2026-08-11 | Float `/` returns `0` for legitimate small operands after intermediate arithmetic | [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) **P0** | GE on divider MNA; `a21=-0.001`, `a11=0.0015`, `(= a21 -0.001)` → `#t` but `(/ a21 a11)` → `0`. `(/ a21 d)` fails for `\|d\|<1`. Workaround: `daed:safe-div` scales so `\|den·scale\|≥1` before `/`. Still pure Aura — **not** a denseness escape. |
-| 2026-08-11 | No `1e-9` scientific literals | [aura#2941](https://github.com/cybrid-systems/aura/issues/2941) **P2** | `1e-9` / `1.0e-9` / `1E-9` → unbound `e-9`. Write `0.000000001` or `(/ 1.0 1000000000.0)`. |
-| 2026-08-11 | Phase 0 smoke | [aura#2766](https://github.com/cybrid-systems/aura/issues/2766) (prior) | Export-before-require discipline |
+| Date | Issue | Upstream | Status | Notes |
+|------|-------|----------|--------|-------|
+| 2026-08-11 | Float `/` returns `0` after intermediate arithmetic | [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) **P0** | **fixed** | Was blocking dense GE; `daed:safe-div` workaround **removed** (2026-08-12). Solver uses native `/`. |
+| 2026-08-11 | No `1e-9` scientific literals | [aura#2941](https://github.com/cybrid-systems/aura/issues/2941) **P2** | **fixed** | `1e3`, `1e-12`, etc. now OK in netlist/probe code. |
+| 2026-08-11 | Export-before-require discipline | [aura#2766](https://github.com/cybrid-systems/aura/issues/2766) | fixed (prior) | Still follow export-before-require in span libs. |
 
-## Daedalus workarounds (inherited from sibling spans)
+## Daedalus workarounds still in force
 
 1. **Form order in span libs**: always `(export …)` before `(require …)` when exports free-ref module cells ([aura#2766](https://github.com/cybrid-systems/aura/issues/2766)).
 2. **Prefer `let*`** over internal `define` for dependent values in probes (host internal-define ≈ simultaneous letrec).
