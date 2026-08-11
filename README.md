@@ -7,6 +7,29 @@
 > analog circuit simulation (SPICE-class), treating netlists, device models and solvers
 > as first-class, mutable, agent-evolvable objects inside Aura’s native semantic space \(V_A\).
 
+## Positioning vs Classic SPICE
+
+Classic SPICE (ngspice, LTspice, HSPICE, …) is a mature **static tool**:
+you give it a netlist, it returns waveforms. Decades of work have made its
+device models, convergence heuristics and sparse solvers extremely robust.
+
+Daedalus does **not** aim to replace production SPICE on accuracy or model coverage.
+Its value lies elsewhere:
+
+| Dimension              | Classic SPICE              | Daedalus                                      |
+|------------------------|----------------------------|-----------------------------------------------|
+| Accuracy & model library | Industry-grade            | Intentionally limited (P0)                    |
+| Numerical robustness   | Battle-hardened            | Will improve over time                        |
+| Circuit as data        | Text file                  | Live FlatAST                                  |
+| Safe mutation          | External scripts only      | First-class (`mutate:*` + snapshot/rollback)  |
+| Agent closed-loop      | Hand-rolled                | Native (Aether-style)                         |
+| Kernel hot-swap        | Restart required           | Designed for (Hephaestus-style)               |
+| Topology semantics     | Post-hoc parsing           | Explicit (Hermes-style)                       |
+
+**One-sentence difference**:
+> SPICE is a calculator you drive from the outside.
+> Daedalus is a living laboratory where agents can rewrite the circuit, the models and even the solver strategies, with versioning and rollback built in.
+
 ## Span Thesis
 
 \( S_{\text{Daedalus}} \) is the region of practical software consisting of:
@@ -16,7 +39,9 @@
 - closed-loop agent evolution of circuit topology / parameters / models
 - topological correctness and probe insertion
 
-**Claim**: Aura’s \(V_A\) is dense enough on this region that the evolvable core (description → simulate → observe → decide → safe-mutate → verify → rollback) remains predominantly pure Aura. Escapes are rare, metered and logged.
+**Claim**: Aura’s \(V_A\) is dense enough on this region that the evolvable core
+(description → simulate → observe → decide → safe-mutate → verify → rollback)
+remains predominantly pure Aura. Escapes are rare, metered and logged.
 
 ## Composition of Existing Spans
 
@@ -27,7 +52,43 @@
 | **Prometheus** | Large-scale AST mutation surface for complex netlists + continuous LLM-driven model refinement |
 | **Hermes** | Explicit topology, node–edge connectivity, interface boundaries and probe insertion |
 
-Daedalus is therefore a **composition span**, not a fifth orthogonal mythic axis. It reifies the Unify synthesis thesis in a concrete engineering domain.
+Daedalus is therefore a **composition span**, not a fifth orthogonal mythic axis.
+It reifies the Unify synthesis thesis in a concrete engineering domain.
+
+## Interesting Play Modes
+
+These are the kinds of experiments Daedalus is designed to make natural:
+
+1. **Agent auto-repair**  
+   Give a target (e.g. “mid-point voltage = 2.5 V, minimise power”).
+   The agent mutates resistors or topology, re-simulates, keeps successful
+   changes and rolls back failures.
+
+2. **Living model evolution**  
+   Treat simple diode / BJT models themselves as mutable ASTs.
+   Agents can change parameters or even the structure of the model and
+   immediately see the effect on circuit behaviour.
+
+3. **Topology search with fitness**  
+   Use simulation results as fitness. Agents perform genetic-style
+   exploration (insert capacitors, move nodes, add buffers) under
+   snapshot/rollback discipline.
+
+4. **Live circuit surgery**  
+   While a transient is conceptually running, take a snapshot, insert a
+   probe or change a parameter, continue, and restore at any moment.
+
+5. **Multi-agent collaboration**  
+   One agent proposes topology, another tunes parameters, a third writes
+   verification assertions — orchestrated with Aether’s `orch:*` primitives.
+
+6. **Exploration → export**  
+   Evolve and explore inside Daedalus, then export a converged netlist to
+   a production SPICE engine for final high-accuracy sign-off.
+
+7. **Teaching dual**  
+   One system that simultaneously teaches Modified Nodal Analysis and
+   safe self-modifying agents.
 
 ## Phase Targets
 
@@ -39,7 +100,7 @@ Daedalus is therefore a **composition span**, not a fifth orthogonal mythic axis
 - Snapshot / rollback preserves both semantic state and denseness metrics
 - At least three denseness probes pass
 
-**Non-goals (P0)**
+**Non-goals (P0)**  
 Full BSIM, commercial-grade sparse solvers, schematic capture UI, mixed-signal co-simulation.
 
 ## Layout
@@ -67,7 +128,9 @@ source ./scripts/env.sh
 
 ## Relation to Unify
 
-May be consumed as a deep project under `unify/projects/daedalus` or kept as a first-class sibling span. Failures and denseness gaps are expected to feed back into Aura via the Unify issue pump.
+May be consumed as a deep project under `unify/projects/daedalus` or kept as a
+first-class sibling span. Failures and denseness gaps are expected to feed back
+into Aura via the Unify issue pump.
 
 ## License
 
