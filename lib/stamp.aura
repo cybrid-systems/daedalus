@@ -1,0 +1,115 @@
+; lib/stamp.aura — Modified Nodal Analysis stamping (Phase 1, linear)
+;
+; (require "stamp" all:)
+;
+; Builds dense MNA system A x = b for R + independent V.
+; Matrix A is row-major flat vector of length N*N; b length N.
+; Unknowns: [v_1 … v_m | i_V0 … i_Vk]  (node 0 = GND fixed at 0).
+
+(export daed:stamp-version
+        daed:mna-size
+        daed:stamp-system
+        daed:mat-ref
+        daed:mat-set!
+        daed:mat-add!
+        daed:vec-ref
+        daed:vec-set!
+        daed:vec-add!)
+
+(require "netlist" all:)
+
+(define daed:stamp-version 1)
+
+(define (daed:mna-size comps)
+  (+ (daed:n-voltage-unknowns comps)
+     (daed:count-type comps "V")))
+
+(define (daed:mat-ref A n i j)
+  (vector-ref A (+ (* i n) j)))
+
+(define (daed:mat-set! A n i j val)
+  (vector-set! A (+ (* i n) j) val))
+
+(define (daed:mat-add! A n i j delta)
+  (daed:mat-set! A n i j (+ (daed:mat-ref A n i j) delta)))
+
+(define (daed:vec-ref b i)
+  (vector-ref b i))
+
+(define (daed:vec-set! b i val)
+  (vector-set! b i val))
+
+(define (daed:vec-add! b i delta)
+  (vector-set! b i (+ (vector-ref b i) delta)))
+
+; Stamp resistor between n1–n2 with resistance r (>0).
+(define (daed:stamp-R! A n n1 n2 r)
+  (if (or (not (number? r)) (<= r 0.0))
+    #f
+    (let ((G (/ 1.0 r))
+          (i1 (daed:node-index n1))
+          (i2 (daed:node-index n2)))
+      (if (>= i1 0)
+        (daed:mat-add! A n i1 i1 G)
+        0)
+      (if (>= i2 0)
+        (daed:mat-add! A n i2 i2 G)
+        0)
+      (if (and (>= i1 0) (>= i2 0))
+        (begin
+          (daed:mat-add! A n i1 i2 (* -1.0 G))
+          (daed:mat-add! A n i2 i1 (* -1.0 G)))
+        0)
+      #t)))
+
+; Stamp independent voltage source n1(+)–n2(-) = val.
+; vs-idx: column/row of branch-current unknown (already absolute index).
+(define (daed:stamp-V! A b n n1 n2 val vs-idx)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (begin
+        (daed:mat-add! A n i1 vs-idx 1.0)
+        (daed:mat-add! A n vs-idx i1 1.0))
+      0)
+    (if (>= i2 0)
+      (begin
+        (daed:mat-add! A n i2 vs-idx -1.0)
+        (daed:mat-add! A n vs-idx i2 -1.0))
+      0)
+    (daed:vec-add! b vs-idx val)
+    #t))
+
+; Build (list N A b n-v) for linear DC MNA.
+; A, b are freshly allocated float vectors.
+(define (daed:stamp-system comps)
+  (let ((n-v (daed:n-voltage-unknowns comps))
+        (n-vs (daed:count-type comps "V")))
+    (let ((N (+ n-v n-vs)))
+      (if (<= N 0)
+        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+        (let ((A (make-vector (* N N) 0.0))
+              (b (make-vector N 0.0))
+              (vs-next n-v))
+          (let loop ((cs comps))
+            (if (null? cs)
+              (list N A b n-v)
+              (begin
+                (let ((c (car cs)))
+                  (let ((ty (daed:comp-type c)))
+                    (cond
+                      ((equal? ty "R")
+                       (daed:stamp-R! A N
+                                      (daed:comp-n1 c)
+                                      (daed:comp-n2 c)
+                                      (daed:comp-value c)))
+                      ((equal? ty "V")
+                       (begin
+                         (daed:stamp-V! A b N
+                                        (daed:comp-n1 c)
+                                        (daed:comp-n2 c)
+                                        (daed:comp-value c)
+                                        vs-next)
+                         (set! vs-next (+ vs-next 1))))
+                      (else 0))))
+                (loop (cdr cs))))))))))

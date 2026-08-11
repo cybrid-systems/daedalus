@@ -10,6 +10,11 @@ Every leave from pure Aura (\(V_A\)) on a circuit-critical path must be recorded
 
 No leave from \(V_A\). Scaffolding and metrology helpers are pure Aura.
 
+## Phase 1
+
+No leave from \(V_A\). Linear MNA stamp + dense GE (`.op`) are pure Aura.
+`daed:safe-div` is a pure-Aura workaround for a host float residual (see `host-residuals.md`), not an escape from \(V_A\).
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

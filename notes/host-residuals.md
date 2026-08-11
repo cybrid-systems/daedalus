@@ -5,7 +5,9 @@ on \(S_{\mathrm{Daedalus}}\).
 
 | Date | Issue | Upstream | Notes |
 |------|-------|----------|-------|
-| 2026-08-11 | *(none observed in Phase 0)* | — | Smoke used export-before-require discipline from #2766 |
+| 2026-08-11 | Float `/` returns `0` for legitimate small operands after intermediate arithmetic | aura host (TBD issue) | Repro: GE on divider MNA; `a21=-0.001`, `a11=0.0015`, `(= a21 -0.001)` → `#t` but `(/ a21 a11)` → `0`. `(/ a21 d)` fails for `\|d\|<1`. Workaround: `daed:safe-div` scales so `\|den·scale\|≥1` before `/`. Still pure Aura — **not** a denseness escape. |
+| 2026-08-11 | No `1e-9` scientific literals | aura parser | Write `0.000000001` or `(/ 1.0 1e9)`-style decimals; `e-9` parses as identifier. |
+| 2026-08-11 | Phase 0 smoke | — | Export-before-require discipline from #2766 |
 
 ## Daedalus workarounds (inherited from sibling spans)
 

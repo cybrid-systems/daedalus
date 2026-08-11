@@ -1,10 +1,7 @@
-; lib/daedalus-min.aura — Phase 0 facade (scaffolding)
+; lib/daedalus-min.aura — Phase 1 facade (linear .op)
 ;
 ; (require "daedalus-min" all:)
 ; Form order: export BEFORE require (#2766).
-;
-; Phase 0 ships only version + baseline metrology helpers.
-; Circuit modules (netlist / stamp / solve / …) land in Phase 1+.
 
 (export daed:min-version
         daed:stats
@@ -16,12 +13,36 @@
         daed:alist-ref
         daed:check-eq
         daed:check-true
+        daed:check-approx
         daed:escape-note!
-        daed:escape-count)
+        daed:escape-count
+        ; netlist
+        daed:netlist-version
+        daed:comp daed:R daed:V daed:circuit
+        daed:ckt-name daed:ckt-comps
+        daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2
+        daed:comp-value daed:comp-set-value!
+        daed:max-node daed:count-type daed:node-index
+        daed:n-voltage-unknowns
+        ; stamp
+        daed:stamp-version daed:mna-size daed:stamp-system
+        daed:mat-ref daed:mat-set! daed:mat-add!
+        daed:vec-ref daed:vec-set! daed:vec-add!
+        ; solve
+        daed:solve-version daed:safe-div daed:dense-solve!
+        daed:simulate-op
+        daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
+        ; probe
+        daed:probe-version daed:v daed:v-ground
+        daed:check-voltage)
 
-; ── Version ──
-; 0 = Phase 0 scaffolding only (no circuit kernel yet)
-(define daed:min-version 0)
+(require "netlist" all:)
+(require "stamp" all:)
+(require "solve" all:)
+(require "probe" all:)
+
+; 1 = Phase 1 linear .op (R, V)
+(define daed:min-version 1)
 
 ; ── Alist helper ──
 (define (daed:alist-ref key lst default)
@@ -85,7 +106,18 @@
     (begin (daed:stats-bump! "correctness_ok") #t)
     (begin (daed:stats-bump! "correctness_fail") #f)))
 
-; ── Escape metering (record every leave from V_A on critical path) ──
+; Stats-aware approximate equality (overrides probe boolean helper name
+; when loaded via daedalus-min — probe still exports the pure predicate
+; as the same name from its module; facade provides the metered form).
+(define (daed:check-approx actual expected tol)
+  (if (and (number? actual)
+           (number? expected)
+           (number? tol)
+           (< (abs (- actual expected)) tol))
+    (begin (daed:stats-bump! "correctness_ok") #t)
+    (begin (daed:stats-bump! "correctness_fail") #f)))
+
+; ── Escape metering ──
 (define (daed:escape-note! reason-tag)
   (daed:stats-bump! "escapes")
   (daed:stats-set! "last_escape_reason" reason-tag)

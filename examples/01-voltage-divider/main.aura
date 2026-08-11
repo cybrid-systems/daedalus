@@ -1,0 +1,107 @@
+; examples/01-voltage-divider/main.aura
+;
+; Phase 1 denseness probe — linear MNA .op on pure-Aura netlist.
+; Voltage divider: V=5, R1=1k, R2=2k → v1=5, v2=10/3≈3.333
+;
+; Axes: circuit kernel (netlist + stamp + solve) + metrology
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/01-voltage-divider/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 01-voltage-divider: linear .op denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " stamp=")
+(display daed:stamp-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+; ── Build circuit ──
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1000.0)
+          (daed:R "r2" 2 0 2000.0))))
+
+(display "circuit=")
+(display (daed:ckt-name ckt))
+(display " comps=")
+(display (length (daed:ckt-comps ckt)))
+(display " max-node=")
+(display (daed:max-node (daed:ckt-comps ckt)))
+(display " mna-size=")
+(display (daed:mna-size (daed:ckt-comps ckt)))
+(newline)
+
+; ── Simulate .op ──
+(define res (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+
+(let* ((ok (daed:op-ok? res))
+       (v1 (daed:v res 1))
+       (v2 (daed:v res 2))
+       (v0 (daed:v res 0))
+       (want-v2 (/ 10.0 3.0))
+       (ok-flag (daed:check-true ok))
+       (v0-ok (daed:check-approx v0 0.0 0.0001))
+       (v1-ok (daed:check-approx v1 5.0 0.0001))
+       (v2-ok (daed:check-approx v2 want-v2 0.001))
+       (escapes (daed:escape-count))
+       (esc-ok (daed:check-eq escapes 0)))
+  (display "op-ok=")
+  (display ok)
+  (display " v0=")
+  (display v0)
+  (display " v1=")
+  (display v1)
+  (display " v2=")
+  (display v2)
+  (display " want-v2=")
+  (display want-v2)
+  (newline)
+  (display "v0-ok=")
+  (display v0-ok)
+  (display " v1-ok=")
+  (display v1-ok)
+  (display " v2-ok=")
+  (display v2-ok)
+  (display " escapes=")
+  (display escapes)
+  (newline)
+  (display "stats: ")
+  (write (daed:stats-alist))
+  (newline)
+
+  (let ((all-ok
+          (and ok-flag v0-ok v1-ok v2-ok esc-ok
+               (= (daed:stats-ref "correctness_fail") 0)
+               (>= (daed:stats-ref "correctness_ok") 5)
+               (>= (daed:stats-ref "sim_runs") 1))))
+    (if all-ok
+      (begin
+        (display "PASS: linear .op voltage divider (escapes=0)")
+        (newline)
+        (display "RESULT pass example=01-voltage-divider escapes=0")
+        (newline))
+      (begin
+        (display "FAIL: voltage divider .op denseness probe")
+        (newline)
+        (display "RESULT fail example=01-voltage-divider")
+        (newline)
+        (display "  ok-flag=")
+        (display ok-flag)
+        (display " v1-ok=")
+        (display v1-ok)
+        (display " v2-ok=")
+        (display v2-ok)
+        (display " esc-ok=")
+        (display esc-ok)
+        (newline)))))

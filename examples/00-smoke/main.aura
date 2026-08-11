@@ -20,9 +20,12 @@
 (display daed:min-version)
 (newline)
 
-; ── 1. Version is Phase 0 ──
-(let* ((ver-ok (daed:check-eq daed:min-version 0)))
-  (display "version-ok=")
+; ── 1. Facade loads (version ≥ 1 once Phase 1 lands) ──
+(let* ((ver-ok (daed:check-true (and (number? daed:min-version)
+                                     (>= daed:min-version 0)))))
+  (display "version=")
+  (display daed:min-version)
+  (display " version-ok=")
   (display ver-ok)
   (newline)
 

@@ -1,0 +1,35 @@
+; lib/probe.aura — Result query helpers (Phase 1)
+;
+; (require "probe" all:)
+
+(export daed:probe-version
+        daed:v
+        daed:v-ground
+        daed:check-approx
+        daed:check-voltage)
+
+(require "solve" all:)
+
+(define daed:probe-version 1)
+
+; Node voltage from .op result. Node 0 → 0.0. Missing → 0.0.
+(define (daed:v res node)
+  (if (or (not (number? node)) (<= node 0))
+    0.0
+    (let ((volts (daed:op-voltages res)))
+      (hash-ref volts (number->string node) 0.0))))
+
+(define (daed:v-ground)
+  0.0)
+
+; Approximate equality |actual-expected| < tol. Bumps correctness stats
+; via daed:check-true when measure module is loaded (caller may wrap).
+; Standalone boolean here; daedalus-min re-exports a stats-aware version.
+(define (daed:check-approx actual expected tol)
+  (and (number? actual)
+       (number? expected)
+       (number? tol)
+       (< (abs (- actual expected)) tol)))
+
+(define (daed:check-voltage res node expected tol)
+  (daed:check-approx (daed:v res node) expected tol))

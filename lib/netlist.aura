@@ -1,0 +1,113 @@
+; lib/netlist.aura — Circuit / Node / Component ADT (Phase 1)
+;
+; (require "netlist" all:)
+;
+; FlatAST-friendly hashes + component lists. Node 0 is GND.
+; P0 components: R (resistor), V (independent voltage source).
+
+(export daed:netlist-version
+        daed:comp
+        daed:R
+        daed:V
+        daed:circuit
+        daed:ckt-name
+        daed:ckt-comps
+        daed:comp-type
+        daed:comp-name
+        daed:comp-n1
+        daed:comp-n2
+        daed:comp-value
+        daed:comp-set-value!
+        daed:max-node
+        daed:count-type
+        daed:node-index
+        daed:n-voltage-unknowns)
+
+(define daed:netlist-version 1)
+
+; ── Component constructors ──
+; type: string "R" | "V" | …
+; n1, n2: integer node ids (0 = GND)
+; value: number (ohms or volts)
+
+(define (daed:comp type name n1 n2 value)
+  (let ((h (hash)))
+    (hash-set! h "type" type)
+    (hash-set! h "name" name)
+    (hash-set! h "n1" n1)
+    (hash-set! h "n2" n2)
+    (hash-set! h "value" value)
+    h))
+
+(define (daed:R name n1 n2 value)
+  (daed:comp "R" name n1 n2 value))
+
+(define (daed:V name n1 n2 value)
+  (daed:comp "V" name n1 n2 value))
+
+(define (daed:circuit name comps)
+  (let ((h (hash)))
+    (hash-set! h "name" name)
+    (hash-set! h "comps" comps)
+    h))
+
+(define (daed:ckt-name ckt)
+  (hash-ref ckt "name" ""))
+
+(define (daed:ckt-comps ckt)
+  (hash-ref ckt "comps" '()))
+
+(define (daed:comp-type c)
+  (hash-ref c "type" ""))
+
+(define (daed:comp-name c)
+  (hash-ref c "name" ""))
+
+(define (daed:comp-n1 c)
+  (hash-ref c "n1" 0))
+
+(define (daed:comp-n2 c)
+  (hash-ref c "n2" 0))
+
+(define (daed:comp-value c)
+  (hash-ref c "value" 0))
+
+(define (daed:comp-set-value! c value)
+  (hash-set! c "value" value)
+  c)
+
+; Highest node id appearing in the netlist (GND=0 counts if present).
+(define (daed:max-node comps)
+  (let ((m 0))
+    (let loop ((cs comps))
+      (if (null? cs)
+        m
+        (begin
+          (let ((c (car cs)))
+            (let ((n1 (daed:comp-n1 c))
+                  (n2 (daed:comp-n2 c)))
+              (if (and (number? n1) (> n1 m)) (set! m n1) 0)
+              (if (and (number? n2) (> n2 m)) (set! m n2) 0)))
+          (loop (cdr cs)))))))
+
+(define (daed:count-type comps type)
+  (let ((n 0))
+    (let loop ((cs comps))
+      (if (null? cs)
+        n
+        (begin
+          (if (equal? (daed:comp-type (car cs)) type)
+            (set! n (+ n 1))
+            0)
+          (loop (cdr cs)))))))
+
+; Map circuit node id → MNA voltage unknown index.
+; Node 0 (GND) → -1 (not an unknown). Node k>0 → k-1.
+; Assumes nodes are densely numbered 0..max-node.
+(define (daed:node-index node)
+  (if (or (not (number? node)) (<= node 0))
+    -1
+    (- node 1)))
+
+(define (daed:n-voltage-unknowns comps)
+  (daed:max-node comps))

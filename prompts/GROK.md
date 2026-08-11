@@ -31,12 +31,13 @@ Primary objects under test:
 
 ## Current Status
 
-**Phase 0 scaffolding landed:**
-- `scripts/run-aura.sh`, `run-all.sh`, `check-structure.sh`
-- `lib/daedalus-min.aura` (version 0 + metrology helpers)
-- Probe `00-smoke` — host + lib load, escapes=0
+**Phase 0–1 landed:**
+- Scaffolding: scripts, denseness notes, `00-smoke`
+- Circuit kernel: `netlist` / `stamp` / `solve` / `probe` (`daed:min-version=1`)
+- Probe `01-voltage-divider` — linear `.op`, \(v_2=10/3\), escapes=0
+- Use `daed:safe-div` on solver paths (host float residual; still pure Aura)
 
-**Next (Phase 1):** `netlist` / `stamp` / `solve` + `01-voltage-divider` linear `.op`.
+**Next (Phase 2):** `C`/`L` + fixed-step `.tran` + `02-rc-lowpass`.
 
 ## When generating or reviewing code
 

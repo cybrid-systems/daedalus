@@ -177,7 +177,7 @@ Requires a local Aura binary (default sibling `../aura-grok/build/aura`).
 ./scripts/run-all.sh
 ```
 
-Phase 1+ circuit probes (planned):
+Phase 1 linear `.op` (voltage divider):
 
 ```bash
 ./scripts/run-aura.sh examples/01-voltage-divider/main.aura

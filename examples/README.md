@@ -15,7 +15,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | # | Name | Axes | Status |
 |---|------|------|--------|
 | 00 | [smoke](00-smoke/) | scaffolding | **PASS** (Phase 0) |
-| 01 | voltage-divider | circuit `.op` | planned Phase 1 |
+| 01 | [voltage-divider](01-voltage-divider/) | circuit `.op` | **PASS** (Phase 1) |
 | 02 | rc-lowpass | `.tran` | planned Phase 2 |
 | 03 | mutate-resistor | safe mutate + rollback | planned Phase 3 |
 | 05 | agent-autotune | O→D→M→V→R | planned Phase 4 |

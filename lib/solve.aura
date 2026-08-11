@@ -1,0 +1,173 @@
+; lib/solve.aura — Dense linear solve + .op entry (Phase 1)
+;
+; (require "solve" all:)
+;
+; Gaussian elimination with partial pivoting on dense MNA.
+; Pure Aura; no FFI (escape count 0 on this path).
+;
+; Host residual: naive (/ a b) can return 0 for legitimate small float
+; operands after intermediate arithmetic (see notes/host-residuals.md).
+; All critical divisions go through daed:safe-div.
+
+(export daed:solve-version
+        daed:safe-div
+        daed:dense-solve!
+        daed:simulate-op
+        daed:op-ok?
+        daed:op-x
+        daed:op-n
+        daed:op-n-v
+        daed:op-voltages)
+
+(require "netlist" all:)
+(require "stamp" all:)
+
+(define daed:solve-version 1)
+
+; Scale numerator/denominator so |den*scale| >= 1 before dividing.
+; Works around host float-div footgun on small post-arithmetic values.
+(define (daed:safe-div num den)
+  (if (or (not (number? num)) (not (number? den)))
+    0.0
+    (if (< (abs den) 0.000000000001)
+      0.0
+      (let ((scale 1.0))
+        (while (lambda ()
+                 (and (< (* (abs den) scale) 1.0)
+                      (< scale 1000000000000.0)))
+          (lambda ()
+            (set! scale (* scale 1024.0))))
+        (/ (* num scale) (* den scale))))))
+
+; Swap rows r1 and r2 in n×n matrix A and rhs b.
+(define (daed:swap-rows! A b n r1 r2)
+  (if (= r1 r2)
+    #t
+    (begin
+      (let ((j 0))
+        (while (lambda () (< j n))
+          (lambda ()
+            (let ((tmp (daed:mat-ref A n r1 j)))
+              (daed:mat-set! A n r1 j (daed:mat-ref A n r2 j))
+              (daed:mat-set! A n r2 j tmp))
+            (set! j (+ j 1)))))
+      (let ((tb (daed:vec-ref b r1)))
+        (daed:vec-set! b r1 (daed:vec-ref b r2))
+        (daed:vec-set! b r2 tb))
+      #t)))
+
+; In-place dense GE + back-sub. Returns #t on success, #f if singular.
+; Solution overwrites b.
+(define (daed:dense-solve! A b n)
+  (let ((ok #t)
+        (col 0))
+    (while (lambda () (and ok (< col n)))
+      (lambda ()
+        ; partial pivot
+        (let ((piv col)
+              (best (abs (daed:mat-ref A n col col)))
+              (r (+ col 1)))
+          (while (lambda () (< r n))
+            (lambda ()
+              (let ((av (abs (daed:mat-ref A n r col))))
+                (if (> av best)
+                  (begin (set! best av) (set! piv r))
+                  0))
+              (set! r (+ r 1))))
+          (if (< best 0.000000000001)
+            (set! ok #f)
+            (begin
+              (daed:swap-rows! A b n col piv)
+              ; eliminate below
+              (let ((i (+ col 1)))
+                (while (lambda () (< i n))
+                  (lambda ()
+                    (let ((diag (daed:mat-ref A n col col)))
+                      (let ((factor (daed:safe-div (daed:mat-ref A n i col) diag)))
+                        (daed:mat-set! A n i col 0.0)
+                        (let ((j (+ col 1)))
+                          (while (lambda () (< j n))
+                            (lambda ()
+                              (daed:mat-set! A n i j
+                                (- (daed:mat-ref A n i j)
+                                   (* factor (daed:mat-ref A n col j))))
+                              (set! j (+ j 1)))))
+                        (daed:vec-set! b i
+                          (- (daed:vec-ref b i)
+                             (* factor (daed:vec-ref b col))))))
+                    (set! i (+ i 1))))))))
+        (set! col (+ col 1))))
+    (if (not ok)
+      #f
+      (begin
+        ; back substitution
+        (let ((i (- n 1)))
+          (while (lambda () (and ok (>= i 0)))
+            (lambda ()
+              (let ((s (daed:vec-ref b i))
+                    (j (+ i 1)))
+                (while (lambda () (< j n))
+                  (lambda ()
+                    (set! s (- s (* (daed:mat-ref A n i j)
+                                    (daed:vec-ref b j))))
+                    (set! j (+ j 1))))
+                (let ((diag (daed:mat-ref A n i i)))
+                  (if (< (abs diag) 0.000000000001)
+                    (set! ok #f)
+                    (daed:vec-set! b i (daed:safe-div s diag)))))
+              (set! i (- i 1)))))
+        ok))))
+
+; Result hash:
+;   ok     → boolean
+;   n      → system size
+;   n_v    → number of voltage unknowns
+;   x      → solution vector (node voltages then branch currents)
+;   volts  → hash "1"→v1, "2"→v2, … (string keys for node ids); "0"→0.0
+(define (daed:simulate-op ckt)
+  (let ((comps (daed:ckt-comps ckt)))
+    (let ((sys (daed:stamp-system comps)))
+      (let ((N (car sys))
+            (A (car (cdr sys)))
+            (b (car (cdr (cdr sys))))
+            (n-v (car (cdr (cdr (cdr sys))))))
+        (let ((res (hash)))
+          (hash-set! res "n" N)
+          (hash-set! res "n_v" n-v)
+          (if (<= N 0)
+            (begin
+              (hash-set! res "ok" #f)
+              (hash-set! res "x" (make-vector 0 0.0))
+              (hash-set! res "volts" (hash))
+              res)
+            (let ((ok (daed:dense-solve! A b N)))
+              (hash-set! res "ok" ok)
+              (hash-set! res "x" b)
+              (let ((volts (hash)))
+                (hash-set! volts "0" 0.0)
+                (if ok
+                  (let ((k 1))
+                    (while (lambda () (<= k n-v))
+                      (lambda ()
+                        (hash-set! volts
+                                   (number->string k)
+                                   (daed:vec-ref b (- k 1)))
+                        (set! k (+ k 1)))))
+                  0)
+                (hash-set! res "volts" volts)
+                res))))))))
+
+(define (daed:op-ok? res)
+  (hash-ref res "ok" #f))
+
+(define (daed:op-x res)
+  (hash-ref res "x" (make-vector 0 0.0)))
+
+(define (daed:op-n res)
+  (hash-ref res "n" 0))
+
+(define (daed:op-n-v res)
+  (hash-ref res "n_v" 0))
+
+(define (daed:op-voltages res)
+  (hash-ref res "volts" (hash)))
