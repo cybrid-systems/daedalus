@@ -90,6 +90,56 @@ These are the kinds of experiments Daedalus is designed to make natural:
    One system that simultaneously teaches Modified Nodal Analysis and
    safe self-modifying agents.
 
+## Educational Use
+
+Daedalus is particularly well-suited for circuit education because it turns two traditionally separate subjects into a single interactive laboratory.
+
+### What it teaches together
+
+- **Classical circuit theory**: KCL/KVL, nodal analysis, MNA stamping, DC operating point, basic transient response.
+- **Modern system thinking**: code-as-data, safe mutation, snapshot/rollback, agent closed-loops.
+
+Students no longer have to learn “circuits first, agents later”. They encounter both in the same runtime.
+
+### From black box to inspectable system
+
+Classic SPICE is largely a black box for learners: write netlist → run → look at waveforms.  
+In Daedalus the netlist is a live FlatAST. Students can:
+
+- `query` nodes and connections,
+- manually `mutate` a component and re-simulate immediately,
+- take snapshots before risky changes and roll back on failure,
+- (later) inspect how the matrix is stamped and how the solver behaves.
+
+### From “verify the formula” to “meet a design goal”
+
+Traditional exercises ask students to calculate a known voltage.  
+With an agent loop the exercise can become:
+
+> Write a small agent that adjusts resistors so the mid-point voltage approaches 2.5 V while keeping power low.
+
+Students practise both circuit intuition and the discipline of defining goals, trying changes safely, and evaluating results.
+
+### Natural progression of difficulty
+
+1. Manual mutation + simulation (feel the effect of parameters).
+2. Simple observe → mutate → re-simulate loops.
+3. Multi-agent collaboration (topology, tuning, checking constraints).
+4. Advanced: attempt to mutate solver strategies themselves and observe convergence differences.
+
+### Concrete classroom scenarios
+
+| Scenario                              | Learning outcome                                      |
+|---------------------------------------|-------------------------------------------------------|
+| Voltage divider + manual R change     | Voltage division, loading effect                      |
+| RC low-pass + change time constant    | Time constants, step response intuition               |
+| Agent auto-tune to a target voltage   | Goal-driven design + safe trial-and-error             |
+| Deliberately break a connection then fix it | Topology correctness, debugging mindset          |
+| Export final netlist to real SPICE    | Understand the boundary between exploration and sign-off tools |
+
+In short: classic SPICE teaches students how to **use a tool to verify known circuits**.  
+Daedalus is better at teaching students how to **understand and reshape circuits, and how to let a program help them explore**.
+
 ## Phase Targets
 
 **P0 / Phase 1**
