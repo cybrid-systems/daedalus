@@ -1,4 +1,4 @@
-; lib/daedalus-min.aura — Phase 2 facade (linear .op + fixed-step .tran)
+; lib/daedalus-min.aura — Phase 4 facade (.op + .tran + mutate + agent loop)
 ;
 ; (require "daedalus-min" all:)
 ; Form order: export BEFORE require (#2766).
@@ -38,21 +38,38 @@
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
         ; tran
         daed:tran-version
-        daed:make-tran-state daed:simulate-tran
+        daed:make-tran-state daed:nsteps-for daed:as-int daed:simulate-tran
         daed:tran-ok? daed:tran-dt daed:tran-tstop daed:tran-nsteps
         daed:tran-times daed:tran-series daed:tran-v daed:tran-v-at
         ; probe
         daed:probe-version daed:v daed:v-ground
-        daed:check-voltage)
+        daed:check-voltage
+        ; mutate (Phase 3)
+        daed:mutate-version
+        daed:find-comp daed:clone-comp daed:clone-circuit
+        daed:topology-ok? daed:value-ok?
+        daed:mutate-value! daed:mutate!
+        daed:restore-circuit! daed:circuit-snapshot daed:comp-snapshot-value
+        daed:snapshot daed:restore!
+        daed:mutate-ok? daed:mutate-reason daed:mutate-old daed:mutate-new
+        ; agent (Phase 4)
+        daed:agent-version
+        daed:observe-v daed:err-abs
+        daed:propose-r-scale daed:propose-divider-bottom-r
+        daed:loop-once daed:agent-step! daed:autotune daed:autotune!
+        daed:step-ok? daed:step-decision daed:step-v daed:step-reason
+        daed:tune-ok? daed:tune-steps daed:tune-v daed:tune-reached?)
 
 (require "netlist" all:)
 (require "stamp" all:)
 (require "solve" all:)
 (require "tran" all:)
 (require "probe" all:)
+(require "mutate-circuit" all:)
+(require "agent" all:)
 
-; 2 = Phase 2 fixed-step .tran (C/L/I + BE companions)
-(define daed:min-version 2)
+; 4 = Phase 4 agent auto-tune closed loop (O→D→M→V→R)
+(define daed:min-version 4)
 
 ; ── Alist helper ──
 (define (daed:alist-ref key lst default)
@@ -72,6 +89,10 @@
     (hash-set! h "sim_runs" 0)
     (hash-set! h "mutations" 0)
     (hash-set! h "rollbacks" 0)
+    (hash-set! h "agent_rounds" 0)
+    (hash-set! h "agent_commits" 0)
+    (hash-set! h "agent_skips" 0)
+    (hash-set! h "agent_refuses" 0)
     h))
 
 (define *daed-stats* (daed:make-stats-hash))
@@ -103,7 +124,218 @@
         (cons "last_escape_reason" (daed:stats-ref "last_escape_reason"))
         (cons "sim_runs" (daed:stats-ref "sim_runs"))
         (cons "mutations" (daed:stats-ref "mutations"))
-        (cons "rollbacks" (daed:stats-ref "rollbacks"))))
+        (cons "rollbacks" (daed:stats-ref "rollbacks"))
+        (cons "agent_rounds" (daed:stats-ref "agent_rounds"))
+        (cons "agent_commits" (daed:stats-ref "agent_commits"))
+        (cons "agent_skips" (daed:stats-ref "agent_skips"))
+        (cons "agent_refuses" (daed:stats-ref "agent_refuses"))))
+
+; Deep-ish clone of denseness metrics (dual rollback).
+(define (daed:clone-stats)
+  (let ((h (hash)))
+    (hash-set! h "correctness_ok" (daed:stats-ref "correctness_ok"))
+    (hash-set! h "correctness_fail" (daed:stats-ref "correctness_fail"))
+    (hash-set! h "escapes" (daed:stats-ref "escapes"))
+    (hash-set! h "last_escape_reason" (daed:stats-ref "last_escape_reason"))
+    (hash-set! h "sim_runs" (daed:stats-ref "sim_runs"))
+    (hash-set! h "mutations" (daed:stats-ref "mutations"))
+    (hash-set! h "rollbacks" (daed:stats-ref "rollbacks"))
+    (hash-set! h "agent_rounds" (daed:stats-ref "agent_rounds"))
+    (hash-set! h "agent_commits" (daed:stats-ref "agent_commits"))
+    (hash-set! h "agent_skips" (daed:stats-ref "agent_skips"))
+    (hash-set! h "agent_refuses" (daed:stats-ref "agent_refuses"))
+    h))
+
+(define (daed:restore-stats! sh)
+  (if (not sh)
+    #f
+    (begin
+      (daed:stats-set! "correctness_ok" (hash-ref sh "correctness_ok" 0))
+      (daed:stats-set! "correctness_fail" (hash-ref sh "correctness_fail" 0))
+      (daed:stats-set! "escapes" (hash-ref sh "escapes" 0))
+      (daed:stats-set! "last_escape_reason" (hash-ref sh "last_escape_reason" 0))
+      (daed:stats-set! "sim_runs" (hash-ref sh "sim_runs" 0))
+      (daed:stats-set! "mutations" (hash-ref sh "mutations" 0))
+      (daed:stats-set! "rollbacks" (hash-ref sh "rollbacks" 0))
+      (daed:stats-set! "agent_rounds" (hash-ref sh "agent_rounds" 0))
+      (daed:stats-set! "agent_commits" (hash-ref sh "agent_commits" 0))
+      (daed:stats-set! "agent_skips" (hash-ref sh "agent_skips" 0))
+      (daed:stats-set! "agent_refuses" (hash-ref sh "agent_refuses" 0))
+      #t)))
+
+; ── Dual snapshot: circuit (semantic) + denseness metrics ──
+; Optional host ast:snapshot id stored when available (>= 0).
+
+(define (daed:snapshot ckt tag)
+  (let ((h (hash))
+        (tg (if (string? tag) tag "daed"))
+        (ast-id -1))
+    (hash-set! h "tag" tg)
+    (hash-set! h "circuit" (daed:circuit-snapshot ckt))
+    (hash-set! h "stats" (daed:clone-stats))
+    ; Best-effort host workspace snapshot (often -1 in offline denseness runs).
+    (set! ast-id
+      (try
+        (let ((id (ast:snapshot tg)))
+          (if (number? id) id -1))
+        (catch (e) -1)))
+    (hash-set! h "ast_id" ast-id)
+    h))
+
+; Restore circuit + metrics; then count a successful rollback.
+(define (daed:restore! ckt snap)
+  (if (not snap)
+    #f
+    (begin
+      (daed:restore-circuit! ckt (hash-ref snap "circuit" #f))
+      (daed:restore-stats! (hash-ref snap "stats" #f))
+      (daed:stats-bump! "rollbacks")
+      #t)))
+
+; Metered mutate: bumps "mutations" on success.
+(define (daed:mutate! ckt name new-value)
+  (let ((r (daed:mutate-value! ckt name new-value)))
+    (if (hash-ref r "ok" #f)
+      (daed:stats-bump! "mutations")
+      0)
+    r))
+
+(define (daed:mutate-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:mutate-reason r)
+  (hash-ref r "reason" ""))
+
+(define (daed:mutate-old r)
+  (hash-ref r "old" 0))
+
+(define (daed:mutate-new r)
+  (hash-ref r "new" 0))
+
+; ── Metered agent step / auto-tune (Phase 4) ──
+; loop-once does circuit-only rollback; counters live here.
+; Result accessors redefined here so facade free-refs stay solid (host export quirks).
+
+(define (daed:step-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:step-decision r)
+  (hash-ref r "decision" ""))
+
+(define (daed:step-v r)
+  (hash-ref r "v1" (hash-ref r "v0" 0.0)))
+
+(define (daed:step-reason r)
+  (hash-ref r "reason" ""))
+
+(define (daed:tune-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:tune-steps r)
+  (hash-ref r "steps" 0))
+
+(define (daed:tune-v r)
+  (hash-ref r "v" 0.0))
+
+(define (daed:tune-reached? r)
+  (hash-ref r "reached" #f))
+
+(define (daed:agent-step! ckt node target tol name new-value)
+  (daed:stats-bump! "agent_rounds")
+  (let ((r (daed:loop-once ckt node target tol name new-value)))
+    (let ((d (hash-ref r "decision" "")))
+      (if (equal? d "commit")
+        (begin
+          (daed:stats-bump! "mutations")
+          (daed:stats-bump! "agent_commits"))
+        0)
+      (if (equal? d "skip")
+        (daed:stats-bump! "agent_skips")
+        0)
+      (if (equal? d "rollback")
+        (daed:stats-bump! "rollbacks")
+        0)
+      (if (equal? d "refuse")
+        (daed:stats-bump! "agent_refuses")
+        0))
+    r))
+
+; Metered multi-step tune. strategy: "scale" | "analytic-divider"
+(define (daed:autotune! ckt node target tol name max-steps strategy rtop-name vin)
+  (let ((res (hash))
+        (steps 0)
+        (reached #f)
+        (last #f)
+        (strat (if (string? strategy) strategy "scale"))
+        (lim (if (and (number? max-steps) (> max-steps 0)) max-steps 1)))
+    (hash-set! res "target" target)
+    (hash-set! res "tol" tol)
+    (let loop ()
+      (if (or reached (>= steps lim))
+        (begin
+          (let ((vf (daed:observe-v ckt node)))
+            (daed:stats-bump! "sim_runs")
+            (hash-set! res "v" (if (number? vf) vf 0.0))
+            (hash-set! res "steps" steps)
+            (hash-set! res "reached"
+              (and (number? vf) (< (daed:err-abs vf target) tol)))
+            (hash-set! res "ok" (hash-ref res "reached" #f))
+            (hash-set! res "last" last)
+            res))
+        (let ((vnow (daed:observe-v ckt node)))
+          (daed:stats-bump! "sim_runs")
+          (if (and (number? vnow) (< (daed:err-abs vnow target) tol))
+            (begin
+              (set! reached #t)
+              (daed:stats-bump! "agent_skips")
+              (set! last
+                (let ((h (hash)))
+                  (hash-set! h "ok" #t)
+                  (hash-set! h "decision" "skip")
+                  (hash-set! h "reason" "within-tol")
+                  (hash-set! h "v0" vnow)
+                  (hash-set! h "v1" vnow)
+                  h))
+              (loop))
+            (let ((prop
+                    (if (equal? strat "analytic-divider")
+                      (let ((rt (daed:find-comp ckt rtop-name)))
+                        (if (not rt)
+                          #f
+                          (daed:propose-divider-bottom-r
+                            (daed:comp-value rt) vin target)))
+                      (let ((c (daed:find-comp ckt name)))
+                        (if (or (not c) (not (number? vnow)) (= vnow 0.0))
+                          #f
+                          (* (daed:comp-value c) (/ target vnow)))))))
+              (if (not (number? prop))
+                (begin
+                  (set! last
+                    (let ((h (hash)))
+                      (hash-set! h "ok" #f)
+                      (hash-set! h "decision" "refuse")
+                      (hash-set! h "reason" "no-proposal")
+                      h))
+                  (daed:stats-bump! "agent_refuses")
+                  (set! steps lim)
+                  (loop))
+                (begin
+                  (set! last
+                    (daed:agent-step! ckt node target tol name prop))
+                  (set! steps (+ steps 1))
+                  (if (and (hash-ref last "ok" #f)
+                           (equal? (hash-ref last "decision" "") "skip"))
+                    (set! reached #t)
+                    0)
+                  (if (and (hash-ref last "ok" #f)
+                           (equal? (hash-ref last "decision" "") "commit")
+                           (< (daed:err-abs (hash-ref last "v1" 0.0) target) tol))
+                    (set! reached #t)
+                    0)
+                  (if (equal? (hash-ref last "decision" "") "refuse")
+                    (set! steps lim)
+                    0)
+                  (loop))))))))))
 
 ; ── Checks ──
 (define (daed:check-eq actual expected)

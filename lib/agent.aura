@@ -1,0 +1,228 @@
+; lib/agent.aura — Circuit agent closed loop (Phase 4)
+;
+; (require "agent" all:)
+;
+; Aether-style O→D→M→V→R on the circuit domain (not workspace rebind):
+;   observe (.op) → decide → snapshot → mutate param → re-sim → verify → rollback
+;
+; Host ast:snapshot often -1 offline (#2966); dual rollback uses circuit clone.
+; Compose pattern with Aether; does not require aether lib on AURA_PATH.
+;
+; Style: flat sequential control (avoid deep if/let nesting — host paren/export
+; fragility on large multi-export modules).
+
+(export daed:agent-version
+        daed:observe-v
+        daed:err-abs
+        daed:propose-r-scale
+        daed:propose-divider-bottom-r
+        daed:loop-once
+        daed:autotune
+        daed:step-ok?
+        daed:step-decision
+        daed:step-v
+        daed:step-reason
+        daed:tune-ok?
+        daed:tune-steps
+        daed:tune-v
+        daed:tune-reached?)
+
+(require "netlist" all:)
+(require "solve" all:)
+(require "probe" all:)
+(require "mutate-circuit" all:)
+
+(define daed:agent-version 1)
+
+(define (daed:step-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:step-decision r)
+  (hash-ref r "decision" ""))
+
+(define (daed:step-v r)
+  (hash-ref r "v1" (hash-ref r "v0" 0.0)))
+
+(define (daed:step-reason r)
+  (hash-ref r "reason" ""))
+
+(define (daed:tune-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:tune-steps r)
+  (hash-ref r "steps" 0))
+
+(define (daed:tune-v r)
+  (hash-ref r "v" 0.0))
+
+(define (daed:tune-reached? r)
+  (hash-ref r "reached" #f))
+
+(define (daed:observe-v ckt node)
+  (let ((op (daed:simulate-op ckt)))
+    (if (daed:op-ok? op)
+      (daed:v op node)
+      #f)))
+
+(define (daed:err-abs v target)
+  (if (and (number? v) (number? target))
+    (abs (- v target))
+    1e300))
+
+; Scale R by target/v (iterative; converges for divider bottom R).
+(define (daed:propose-r-scale ckt name node target)
+  (let ((c (daed:find-comp ckt name))
+        (v (daed:observe-v ckt node)))
+    (if (or (not c) (not (number? v)) (= v 0.0) (not (number? target)))
+      #f
+      (let ((old (daed:comp-value c)))
+        (if (or (not (number? old)) (<= old 0.0))
+          #f
+          (* old (/ target v)))))))
+
+; Analytic: Rbot = Rtop * target / (Vin - target)
+(define (daed:propose-divider-bottom-r rtop vin target)
+  (if (or (not (number? rtop)) (not (number? vin)) (not (number? target))
+          (<= rtop 0.0) (<= vin 0.0) (<= target 0.0) (>= target vin))
+    #f
+    (/ (* rtop target) (- vin target))))
+
+; One O→D→M→V→R step. Returns result hash.
+(define (daed:loop-once ckt node target tol name new-value)
+  (let ((res (hash))
+        (done #f))
+    (hash-set! res "name" name)
+    (hash-set! res "new" new-value)
+    (hash-set! res "ok" #f)
+    (hash-set! res "decision" "refuse")
+    (hash-set! res "reason" "init")
+    (hash-set! res "v0" 0.0)
+    (hash-set! res "v1" 0.0)
+    (hash-set! res "old" 0)
+    (let ((v0 (daed:observe-v ckt node)))
+      (if (not (number? v0))
+        (begin
+          (hash-set! res "reason" "observe-failed")
+          (set! done #t))
+        (begin
+          (hash-set! res "v0" v0)
+          (hash-set! res "v1" v0)
+          (if (< (daed:err-abs v0 target) tol)
+            (begin
+              (hash-set! res "ok" #t)
+              (hash-set! res "decision" "skip")
+              (hash-set! res "reason" "within-tol")
+              (set! done #t))
+            0))))
+    (if (not done)
+      (let ((c (daed:find-comp ckt name)))
+        (if (not c)
+          (begin
+            (hash-set! res "reason" "not-found")
+            (set! done #t))
+          (let ((old (daed:comp-value c))
+                (snap (daed:circuit-snapshot ckt))
+                (v0 (hash-ref res "v0" 0.0)))
+            (hash-set! res "old" old)
+            (let ((mut (daed:mutate-value! ckt name new-value)))
+              (if (not (hash-ref mut "ok" #f))
+                (begin
+                  (hash-set! res "decision" "refuse")
+                  (hash-set! res "reason" (hash-ref mut "reason" "bad-value"))
+                  (set! done #t))
+                (let ((v1 (daed:observe-v ckt node)))
+                  (if (not (number? v1))
+                    (begin
+                      (daed:restore-circuit! ckt snap)
+                      (hash-set! res "ok" #f)
+                      (hash-set! res "decision" "rollback")
+                      (hash-set! res "reason" "observe-after-failed")
+                      (set! done #t))
+                    (let ((e0 (daed:err-abs v0 target))
+                          (e1 (daed:err-abs v1 target)))
+                      (hash-set! res "v1" v1)
+                      (if (or (< e1 tol) (< e1 e0))
+                        (begin
+                          (hash-set! res "ok" #t)
+                          (hash-set! res "decision" "commit")
+                          (if (< e1 tol)
+                            (hash-set! res "reason" "within-tol")
+                            (hash-set! res "reason" "improved"))
+                          (set! done #t))
+                        (begin
+                          (daed:restore-circuit! ckt snap)
+                          (hash-set! res "ok" #f)
+                          (hash-set! res "decision" "rollback")
+                          (hash-set! res "reason" "verify-worsened")
+                          (set! done #t)))))))))))
+      0)
+    res))
+
+; Multi-step auto-tune. strategy: "scale" | "analytic-divider"
+(define (daed:autotune ckt node target tol name max-steps strategy rtop-name vin)
+  (let ((res (hash))
+        (steps 0)
+        (reached #f)
+        (last #f)
+        (strat (if (string? strategy) strategy "scale"))
+        (lim (if (and (number? max-steps) (> max-steps 0)) max-steps 1)))
+    (hash-set! res "target" target)
+    (hash-set! res "tol" tol)
+    (while (lambda () (and (not reached) (< steps lim)))
+      (lambda ()
+        (let ((vnow (daed:observe-v ckt node)))
+          (if (and (number? vnow) (< (daed:err-abs vnow target) tol))
+            (begin
+              (set! reached #t)
+              (let ((h (hash)))
+                (hash-set! h "ok" #t)
+                (hash-set! h "decision" "skip")
+                (hash-set! h "reason" "within-tol")
+                (hash-set! h "v0" vnow)
+                (hash-set! h "v1" vnow)
+                (set! last h)))
+            (let ((prop #f))
+              (if (equal? strat "analytic-divider")
+                (let ((rt (daed:find-comp ckt rtop-name)))
+                  (if rt
+                    (set! prop
+                      (daed:propose-divider-bottom-r
+                        (daed:comp-value rt) vin target))
+                    (set! prop #f)))
+                (if (and (number? vnow) (not (= vnow 0.0)))
+                  (let ((c (daed:find-comp ckt name)))
+                    (if c
+                      (set! prop (* (daed:comp-value c) (/ target vnow)))
+                      (set! prop #f)))
+                  (set! prop #f)))
+              (if (not (number? prop))
+                (begin
+                  (let ((h (hash)))
+                    (hash-set! h "ok" #f)
+                    (hash-set! h "decision" "refuse")
+                    (hash-set! h "reason" "no-proposal")
+                    (set! last h))
+                  (set! steps lim))
+                (begin
+                  (set! last (daed:loop-once ckt node target tol name prop))
+                  (set! steps (+ steps 1))
+                  (if (and (hash-ref last "ok" #f)
+                           (equal? (hash-ref last "decision" "") "skip"))
+                    (set! reached #t)
+                    0)
+                  (if (and (hash-ref last "ok" #f)
+                           (equal? (hash-ref last "decision" "") "commit")
+                           (< (daed:err-abs (hash-ref last "v1" 0.0) target) tol))
+                    (set! reached #t)
+                    0)
+                  (if (equal? (hash-ref last "decision" "") "refuse")
+                    (set! steps lim)
+                    0))))))))
+    (let ((vf (daed:observe-v ckt node)))
+      (hash-set! res "v" (if (number? vf) vf 0.0))
+      (hash-set! res "steps" steps)
+      (hash-set! res "reached"
+        (and (number? vf) (< (daed:err-abs vf target) tol)))
+      (hash-set! res "ok" (hash-ref res "reached" #f))
+      (hash-set! res "last" last)
+      res)))

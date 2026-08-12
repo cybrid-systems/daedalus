@@ -8,7 +8,8 @@ PROBES=(
   00-smoke
   01-voltage-divider
   02-rc-lowpass
-  # Phase 3+: 03-mutate-resistor …
+  03-mutate-resistor
+  05-agent-autotune
 )
 
 pass=0

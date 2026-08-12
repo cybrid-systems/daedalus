@@ -31,14 +31,16 @@ Primary objects under test:
 
 ## Current Status
 
-**Phase 0–2 landed:**
+**Phase 0–4 landed (P0 denseness slice):**
 - Scaffolding: scripts, denseness notes, `00-smoke`
-- Circuit kernel: `netlist` / `stamp` / `solve` / `tran` / `probe` (`daed:min-version=2`)
+- Circuit kernel: `netlist` / `stamp` / `solve` / `tran` / `probe` / `mutate-circuit` / `agent` (`daed:min-version=4`)
 - Probe `01-voltage-divider` — linear `.op`, \(v_2=10/3\), escapes=0
 - Probe `02-rc-lowpass` — `.op` + fixed-step BE `.tran`, analytic RC checks, escapes=0
-- Solver: native `/`, sci literals; `.tran` takes **integer** `nsteps`
+- Probe `03-mutate-resistor` — safe `daed:mutate!` + dual `daed:snapshot`/`restore!`, escapes=0
+- Probe `05-agent-autotune` — O→D→M→V→R auto-tune to \(v_2=2.5\), escapes=0
+- Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 
-**Next (Phase 3):** parameter mutate + snapshot/rollback + `03-mutate-resistor`.
+**Post-P0:** topology mutate, multi-agent compose, nonlinear devices (as needed).
 
 ## When generating or reviewing code
 

@@ -1,8 +1,8 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-12  
-**Status:** **Phase 2 fixed-step `.tran`** — probes **00–02** PASS; pure-Aura MNA + BE companions, core \(E=0\).  
-**Judgment:** partial — linear DC and fixed-step transient denseness hold; full \(S_{\mathrm{Daedalus}}\) claim still requires mutate + agent loop.
+**Status:** **Phase 4 agent closed loop** — probes **00–03, 05** PASS; pure-Aura MNA + BE + mutate + O→D→M→V→R, core \(E=0\).  
+**Judgment:** **partial → strong on P0 slice** — linear DC, fixed-step transient, parameter mutate, and agent auto-tune denseness hold on the evolvable core. Full multi-agent / topology-search product claim remains out of P0.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
 **Prior spans:** Aether / Hephaestus / Hermes / Prometheus denseness reports (siblings)
@@ -24,7 +24,8 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | Netlist FlatAST (R, C, L, V, I) | Full BSIM / commercial models |
 | Linear `.op`, fixed-step `.tran` | Schematic UI, mixed-signal |
 | Safe mutate + snapshot/rollback | Production sparse solvers |
-| ≥3 denseness probes | Full multi-agent orch product |
+| Agent closed loop on parameters | Full multi-agent orch product |
+| ≥3 denseness probes | |
 
 ---
 
@@ -35,31 +36,36 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [00](../examples/00-smoke/) | scaffolding | **PASS** | 0 | 0 |
 | [01](../examples/01-voltage-divider/) | circuit `.op` | **PASS** | 0 | 0 |
 | [02](../examples/02-rc-lowpass/) | `.op` + `.tran` | **PASS** | 0 | 0 |
-| 03 mutate-resistor | Aether compose | planned | — | — |
+| [03](../examples/03-mutate-resistor/) | mutate + dual rollback | **PASS** | 0 | 0 |
+| [05](../examples/05-agent-autotune/) | O→D→M→V→R | **PASS** | 0 | 0 |
 
-### Phase 1 narrative
+### Phase 1–2 narrative
 
-- `netlist` / `stamp` / `solve` / `probe` implement linear MNA in pure Aura.
-- Voltage divider analytic check: \(v_2 = 5 \cdot \frac{2000}{3000} = \frac{10}{3}\).
-- Dense GE uses native `/` and sci literals after [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) / [#2941](https://github.com/cybrid-systems/aura/issues/2941).
+- Linear MNA `.op` + fixed-step BE `.tran` in pure Aura (native `/`, sci literals post #2940/#2941; `nsteps` via `as-int` post #2965).
 
-### Phase 2 narrative
+### Phase 3 narrative
 
-- Components `C`, `L`, `I`; DC treats C as open, L as 0 V short.
-- Fixed-step Backward Euler companions for C/L; `daed:simulate-tran` with **integer** `nsteps`.
-- RC low-pass: `.op` \(v_2=5\); `.tran` \(v_2(\tau)\) and \(v_2(5\tau)\) within relative tolerance of \(5(1-e^{-t/\tau})\).
+- `mutate-circuit` + dual `daed:snapshot` / `restore!` (circuit clone + denseness metrics).
+- Host `ast:snapshot` often `-1` offline ([aura#2966](https://github.com/cybrid-systems/aura/issues/2966)); circuit-domain rollback is pure Aura.
+
+### Phase 4 narrative
+
+- `agent.aura`: `daed:loop-once` / `daed:autotune!` — observe → decide → circuit snapshot → mutate → re-sim → verify → rollback.
+- Compose **pattern** with Aether (O→D→M→V→R); circuit-domain data, not workspace `mutate:rebind`.
+- Probe 05: refuse `R≤0`; rollback worsen; iterative scale to \(v_2\approx 2.5\); analytic one-shot \(R_2=R_1\); skip when within tol; escapes=0.
 
 ---
 
 ## Judgment
 
-> On the **linear `.op` + fixed-step `.tran` slice** of \(S_{\mathrm{Daedalus}}\), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\)).  
-> Full span claim waits for safe mutation and agent closed-loop probes (≥3 probes already pass: 00–02).
+> On the **P0 Daedalus slice** (linear `.op`, fixed-step `.tran`, parameter mutate, agent auto-tune), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\), probes 00–03 and 05 PASS).  
+> Remaining growth is product depth (topology search, multi-agent, nonlinear devices) — not a denseness blocker for the stated P0 claim.
 
 ---
 
-## Next
+## Next (post-P0)
 
-1. Phase 3: parameter mutate + snapshot/rollback + probe **03**
-2. Phase 4: agent auto-tune closed loop
-3. Keep escapes in [escape-log.md](escape-log.md); host issues in [host-residuals.md](host-residuals.md)
+1. Topology mutate denseness (insert/remove component under Hermes invariants)
+2. Optional Aether `orch:*` multi-agent compose
+3. Nonlinear devices / Newton (metered escapes if needed)
+4. Keep [escape-log.md](escape-log.md) / [host-residuals.md](host-residuals.md) current

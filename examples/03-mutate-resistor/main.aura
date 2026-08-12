@@ -1,0 +1,180 @@
+; examples/03-mutate-resistor/main.aura
+;
+; Phase 3 denseness probe — safe parameter mutate + dual snapshot/rollback.
+; Voltage divider: V=5, R1=1k, R2=2k → v2=10/3; after R2→1k → v2=2.5
+;
+; Axes: mutate + dual rollback (circuit + denseness metrics) + .op re-sim
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/03-mutate-resistor/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 03-mutate-resistor: safe mutate + dual rollback ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " mutate=")
+(display daed:mutate-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define Vin 5.0)
+(define R1 1e3)
+(define R2 2e3)
+
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 R1)
+          (daed:R "r2" 2 0 R2))))
+
+(define topo0 (daed:topology-ok? ckt))
+(define topo-flag (daed:check-true topo0))
+
+; ── Baseline .op ──
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-0 (daed:v op0 2))
+(define want0 (/ (* Vin R2) (+ R1 R2)))
+(define base-ok (daed:check-approx v2-0 want0 1e-3))
+
+(display "baseline v2=")
+(display v2-0)
+(display " want=")
+(display want0)
+(display " topo-ok=")
+(display topo0)
+(newline)
+
+; ── Dual snapshot (circuit + denseness metrics) ──
+(define snap (daed:snapshot ckt "pre-mutate"))
+(define snap-r2 (daed:comp-snapshot-value (hash-ref snap "circuit" #f) "r2"))
+(define snap-flag (daed:check-approx snap-r2 R2 1e-9))
+
+; ── Reject bad value (R <= 0) without changing circuit ──
+(define bad (daed:mutate! ckt "r2" 0.0))
+(define bad-rej (daed:check-true (not (daed:mutate-ok? bad))))
+(define r2-still (daed:comp-value (daed:find-comp ckt "r2")))
+(define bad-unchanged (daed:check-approx r2-still R2 1e-9))
+
+(display "bad-value rejected=")
+(display (not (daed:mutate-ok? bad)))
+(display " reason=")
+(display (daed:mutate-reason bad))
+(display " r2=")
+(display r2-still)
+(newline)
+
+; ── Apply good mutate: R2 → 1k → v2 = 2.5 ──
+(define mut (daed:mutate! ckt "r2" 1e3))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define op1 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-1 (daed:v op1 2))
+(define want1 (/ (* Vin 1e3) (+ R1 1e3)))
+(define mut-v-ok (daed:check-approx v2-1 want1 1e-3))
+
+(display "after mutate r2=")
+(display (daed:comp-value (daed:find-comp ckt "r2")))
+(display " v2=")
+(display v2-1)
+(display " want=")
+(display want1)
+(display " mutations=")
+(display (daed:stats-ref "mutations"))
+(newline)
+
+; Pollute metrics then dual-rollback
+(daed:stats-bump! "correctness_fail")
+(define fail-before-rb (daed:stats-ref "correctness_fail"))
+(define muts-before-rb (daed:stats-ref "mutations"))
+
+(define rb-ok (daed:restore! ckt snap))
+(define rb-flag (daed:check-true rb-ok))
+(define r2-restored (daed:comp-value (daed:find-comp ckt "r2")))
+(define r2-ok (daed:check-approx r2-restored R2 1e-9))
+(define op2 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-2 (daed:v op2 2))
+(define v2-restored-ok (daed:check-approx v2-2 want0 1e-3))
+
+; Metrics: baseline snapshot had correctness_fail=0 (only ok checks before mutate path);
+; after restore, fail count is restored then rollbacks bumped.
+; Snapshot was taken after base-ok/topo/snap-flag checks — fail was 0 then.
+(define fail-after (daed:stats-ref "correctness_fail"))
+(define muts-after (daed:stats-ref "mutations"))
+(define rbs (daed:stats-ref "rollbacks"))
+; Dual metrics: polluted fail must not stick; mutations from post-snap undone
+(define metrics-ok
+  (and (= fail-after 0)
+       (= muts-after 0)
+       (>= rbs 1)))
+(define metrics-flag (daed:check-true metrics-ok))
+
+(display "rollback r2=")
+(display r2-restored)
+(display " v2=")
+(display v2-2)
+(display " rollbacks=")
+(display rbs)
+(display " fail-before-rb=")
+(display fail-before-rb)
+(display " fail-after=")
+(display fail-after)
+(display " muts-after=")
+(display muts-after)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(let ((all-ok
+        (and topo-flag base-ok snap-flag
+             bad-rej bad-unchanged
+             mut-ok mut-v-ok
+             rb-flag r2-ok v2-restored-ok metrics-flag esc-ok
+             (= (daed:stats-ref "correctness_fail") 0)
+             ; post-restore: snap baseline ok-count + verify checks; sim_runs restored then +1
+             (>= (daed:stats-ref "correctness_ok") 7)
+             (>= (daed:stats-ref "sim_runs") 2)
+             (>= (daed:stats-ref "rollbacks") 1)
+             (= (daed:escape-count) 0)
+             (= (daed:stats-ref "mutations") 0))))
+  (if all-ok
+    (begin
+      (display "PASS: mutate resistor + dual rollback (escapes=0)")
+      (newline)
+      (display "RESULT pass example=03-mutate-resistor escapes=0")
+      (newline))
+    (begin
+      (display "FAIL: mutate-resistor denseness probe")
+      (newline)
+      (display "RESULT fail example=03-mutate-resistor")
+      (newline)
+      (display "  topo=")
+      (display topo-flag)
+      (display " base=")
+      (display base-ok)
+      (display " mut=")
+      (display mut-ok)
+      (display " mut-v=")
+      (display mut-v-ok)
+      (display " rb=")
+      (display rb-flag)
+      (display " r2=")
+      (display r2-ok)
+      (display " metrics=")
+      (display metrics-flag)
+      (display " esc=")
+      (display esc-ok)
+      (newline))))

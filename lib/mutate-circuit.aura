@@ -1,0 +1,183 @@
+; lib/mutate-circuit.aura — Safe parameter mutate + dual snapshot (Phase 3)
+;
+; (require "mutate-circuit" all:)
+;
+; Circuit is a live FlatAST-friendly hash. Dual rollback:
+;   - semantic: deep-cloned component values / topology fields
+;   - denseness metrics: cloned by the facade (daed:snapshot / restore!)
+;
+; Host ast:snapshot may be unavailable (id -1); circuit-domain snapshot is pure Aura.
+
+(export daed:mutate-version
+        daed:find-comp
+        daed:clone-comp
+        daed:clone-circuit
+        daed:topology-ok?
+        daed:value-ok?
+        daed:mutate-value!
+        daed:restore-circuit!
+        daed:circuit-snapshot
+        daed:comp-snapshot-value)
+
+(require "netlist" all:)
+
+(define daed:mutate-version 1)
+
+; ── Lookup ──
+
+(define (daed:find-comp ckt name)
+  (let loop ((cs (daed:ckt-comps ckt)))
+    (if (null? cs)
+      #f
+      (if (equal? (daed:comp-name (car cs)) name)
+        (car cs)
+        (loop (cdr cs))))))
+
+; ── Clone (semantic snapshot building blocks) ──
+
+(define (daed:clone-comp c)
+  (daed:comp (daed:comp-type c)
+             (daed:comp-name c)
+             (daed:comp-n1 c)
+             (daed:comp-n2 c)
+             (daed:comp-value c)))
+
+(define (daed:clone-comps cs)
+  (if (null? cs)
+    '()
+    (cons (daed:clone-comp (car cs))
+          (daed:clone-comps (cdr cs)))))
+
+(define (daed:clone-circuit ckt)
+  (daed:circuit (daed:ckt-name ckt)
+                (daed:clone-comps (daed:ckt-comps ckt))))
+
+; Circuit-only snap payload (hash): name + comps clone.
+(define (daed:circuit-snapshot ckt)
+  (let ((h (hash)))
+    (hash-set! h "name" (daed:ckt-name ckt))
+    (hash-set! h "comps" (daed:clone-comps (daed:ckt-comps ckt)))
+    h))
+
+(define (daed:comp-snapshot-value snap name)
+  (let loop ((cs (hash-ref snap "comps" '())))
+    (if (null? cs)
+      #f
+      (if (equal? (daed:comp-name (car cs)) name)
+        (daed:comp-value (car cs))
+        (loop (cdr cs))))))
+
+; ── Topology / value guards (Hermes-lite) ──
+
+(define (daed:node-ok? n)
+  (and (number? n) (>= n 0) (= n (round n))))
+
+(define (daed:value-ok? type value)
+  (if (not (number? value))
+    #f
+    (if (or (equal? type "R") (equal? type "C") (equal? type "L"))
+      (> value 0.0)
+      #t)))
+
+(define (daed:name-seen? name seen)
+  (let loop ((xs seen))
+    (if (null? xs)
+      #f
+      (if (equal? (car xs) name)
+        #t
+        (loop (cdr xs))))))
+
+(define (daed:topology-ok? ckt)
+  (let ((cs (daed:ckt-comps ckt)))
+    (if (null? cs)
+      #f
+      (let loop ((rest cs) (seen '()))
+        (if (null? rest)
+          #t
+          (let ((c (car rest)))
+            (let ((name (daed:comp-name c))
+                  (type (daed:comp-type c))
+                  (n1 (daed:comp-n1 c))
+                  (n2 (daed:comp-n2 c))
+                  (val (daed:comp-value c)))
+              (if (or (not (string? name))
+                      (equal? name "")
+                      (daed:name-seen? name seen)
+                      (not (string? type))
+                      (not (daed:node-ok? n1))
+                      (not (daed:node-ok? n2))
+                      (not (daed:value-ok? type val)))
+                #f
+                (loop (cdr rest) (cons name seen))))))))))
+
+; ── Mutate parameter ──
+; Returns hash: ok, reason, name, old, new
+
+(define (daed:mutate-value! ckt name new-value)
+  (let ((res (hash)))
+    (hash-set! res "name" name)
+    (hash-set! res "new" new-value)
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "ok" #f)
+        (hash-set! res "reason" "topology")
+        (hash-set! res "old" 0)
+        res)
+      (let ((c (daed:find-comp ckt name)))
+        (if (not c)
+          (begin
+            (hash-set! res "ok" #f)
+            (hash-set! res "reason" "not-found")
+            (hash-set! res "old" 0)
+            res)
+          (let ((old (daed:comp-value c))
+                (type (daed:comp-type c)))
+            (hash-set! res "old" old)
+            (if (not (daed:value-ok? type new-value))
+              (begin
+                (hash-set! res "ok" #f)
+                (hash-set! res "reason" "bad-value")
+                res)
+              (begin
+                (daed:comp-set-value! c new-value)
+                (if (daed:topology-ok? ckt)
+                  (begin
+                    (hash-set! res "ok" #t)
+                    (hash-set! res "reason" "applied")
+                    res)
+                  (begin
+                    ; roll component value back locally
+                    (daed:comp-set-value! c old)
+                    (hash-set! res "ok" #f)
+                    (hash-set! res "reason" "topology-after")
+                    res))))))))))
+
+; Copy snap fields onto live circuit components (same ckt object identity).
+(define (daed:restore-circuit! ckt snap)
+  (if (not snap)
+    #f
+    (begin
+      (hash-set! ckt "name" (hash-ref snap "name" (daed:ckt-name ckt)))
+      (let ((snap-comps (hash-ref snap "comps" '())))
+        (let loop ((live (daed:ckt-comps ckt)))
+          (if (null? live)
+            #t
+            (begin
+              (let ((c (car live)))
+                (let ((sc (daed:find-comp-in-list snap-comps (daed:comp-name c))))
+                  (if sc
+                    (begin
+                      (hash-set! c "type" (daed:comp-type sc))
+                      (hash-set! c "n1" (daed:comp-n1 sc))
+                      (hash-set! c "n2" (daed:comp-n2 sc))
+                      (hash-set! c "value" (daed:comp-value sc)))
+                    0)))
+              (loop (cdr live)))))))))
+
+(define (daed:find-comp-in-list comps name)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #f
+      (if (equal? (daed:comp-name (car cs)) name)
+        (car cs)
+        (loop (cdr cs))))))

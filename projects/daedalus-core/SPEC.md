@@ -66,6 +66,9 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Netlist ADT + stamp skeleton (`netlist.aura`, `stamp.aura`)
 - [x] Linear `.op` (`solve.aura`, `probe.aura`, denseness probe 01)
 - [x] Fixed-step `.tran` (C/L BE companions, `tran.aura`, denseness probe 02)
-- [ ] First agent mutate loop
+- [x] Safe parameter mutate + dual snapshot/rollback (`mutate-circuit.aura`, probe 03)
+- [x] Agent closed-loop auto-tune (`agent.aura`, probe 05)
 - [x] denseness probe 01
 - [x] denseness probe 02
+- [x] denseness probe 03
+- [x] denseness probe 05

@@ -189,6 +189,18 @@ Phase 2 fixed-step `.tran` (RC low-pass):
 ./scripts/run-aura.sh examples/02-rc-lowpass/main.aura
 ```
 
+Phase 3 safe mutate + dual rollback:
+
+```bash
+./scripts/run-aura.sh examples/03-mutate-resistor/main.aura
+```
+
+Phase 4 agent auto-tune closed loop:
+
+```bash
+./scripts/run-aura.sh examples/05-agent-autotune/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

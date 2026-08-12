@@ -1,0 +1,186 @@
+; examples/05-agent-autotune/main.aura
+;
+; Phase 4 denseness probe — agent closed loop O→D→M→V→R on circuit params.
+; Voltage divider: V=5, R1=1k, R2=2k → tune R2 so v2 → 2.5 V
+;
+; Axes: observe → decide → safe-mutate → verify → rollback + metrology
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/05-agent-autotune/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 05-agent-autotune: O→D→M→V→R closed loop ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " agent=")
+(display daed:agent-version)
+(display " mutate=")
+(display daed:mutate-version)
+(newline)
+
+(define Vin 5.0)
+(define R1 1e3)
+(define R2 2e3)
+(define target 2.5)
+(define tol 0.05)
+
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 R1)
+          (daed:R "r2" 2 0 R2))))
+
+; ── Baseline ──
+(define v0 (daed:observe-v ckt 2))
+(daed:stats-bump! "sim_runs")
+(define base-high (daed:check-true (and (number? v0) (> v0 target))))
+(display "baseline v2=")
+(display v0)
+(display " target=")
+(display target)
+(newline)
+
+; ── 1. Refuse bad propose (R2 <= 0) ──
+(define bad (daed:agent-step! ckt 2 target tol "r2" 0.0))
+(define bad-refuse
+  (daed:check-true
+    (and (not (daed:step-ok? bad))
+         (equal? (daed:step-decision bad) "refuse"))))
+(define r2-after-bad (daed:comp-value (daed:find-comp ckt "r2")))
+(define bad-unchanged (daed:check-approx r2-after-bad R2 1e-9))
+(display "bad-step decision=")
+(display (daed:step-decision bad))
+(display " reason=")
+(display (daed:step-reason bad))
+(display " r2=")
+(display r2-after-bad)
+(newline)
+
+; ── 2. Worsen then rollback (huge R2 moves v further from 2.5) ──
+(define worse (daed:agent-step! ckt 2 target tol "r2" 1e6))
+(define worse-rb
+  (daed:check-true
+    (and (not (daed:step-ok? worse))
+         (equal? (daed:step-decision worse) "rollback"))))
+(define r2-after-worse (daed:comp-value (daed:find-comp ckt "r2")))
+(define worse-restored (daed:check-approx r2-after-worse R2 1e-9))
+(display "worse-step decision=")
+(display (daed:step-decision worse))
+(display " reason=")
+(display (daed:step-reason worse))
+(display " r2=")
+(display r2-after-worse)
+(newline)
+
+; ── 3. Multi-step scale auto-tune → v2 ≈ 2.5 ──
+(define tune
+  (daed:autotune! ckt 2 target tol "r2" 20 "scale" "r1" Vin))
+(define tune-ok (daed:check-true (daed:tune-reached? tune)))
+(define v-final (daed:tune-v tune))
+(define v-ok (daed:check-approx v-final target tol))
+(define r2-final (daed:comp-value (daed:find-comp ckt "r2")))
+(define steps (daed:tune-steps tune))
+(define steps-ok (daed:check-true (and (number? steps) (> steps 0) (<= steps 20))))
+
+(display "autotune reached=")
+(display (daed:tune-reached? tune))
+(display " steps=")
+(display steps)
+(display " v2=")
+(display v-final)
+(display " r2=")
+(display r2-final)
+(newline)
+
+; ── 4. Already at target → skip ──
+(define skip (daed:agent-step! ckt 2 target tol "r2" r2-final))
+(define skip-ok
+  (daed:check-true
+    (and (daed:step-ok? skip)
+         (equal? (daed:step-decision skip) "skip"))))
+(display "skip-step decision=")
+(display (daed:step-decision skip))
+(newline)
+
+; ── 5. Analytic one-shot on fresh circuit ──
+(define ckt2
+  (daed:circuit "divider2"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 R1)
+          (daed:R "r2" 2 0 R2))))
+(define tune2
+  (daed:autotune! ckt2 2 target 0.01 "r2" 5 "analytic-divider" "r1" Vin))
+(define analytic-ok (daed:check-true (daed:tune-reached? tune2)))
+(define v2a (daed:tune-v tune2))
+(define analytic-v (daed:check-approx v2a target 0.02))
+(display "analytic reached=")
+(display (daed:tune-reached? tune2))
+(display " steps=")
+(display (daed:tune-steps tune2))
+(display " v2=")
+(display v2a)
+(display " r2=")
+(display (daed:comp-value (daed:find-comp ckt2 "r2")))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define rounds (daed:stats-ref "agent_rounds"))
+(define commits (daed:stats-ref "agent_commits"))
+(define rolls (daed:stats-ref "rollbacks"))
+(define refuses (daed:stats-ref "agent_refuses"))
+(define metrics-ok
+  (daed:check-true
+    (and (>= rounds 1)
+         (>= commits 1)
+         (>= rolls 1)
+         (>= refuses 1))))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(let ((all-ok
+        (and base-high bad-refuse bad-unchanged
+             worse-rb worse-restored
+             tune-ok v-ok steps-ok
+             skip-ok
+             analytic-ok analytic-v
+             esc-ok metrics-ok
+             (= (daed:stats-ref "correctness_fail") 0)
+             (= (daed:escape-count) 0)
+             (>= (daed:stats-ref "correctness_ok") 10))))
+  (if all-ok
+    (begin
+      (display "PASS: agent auto-tune closed loop (escapes=0)")
+      (newline)
+      (display "RESULT pass example=05-agent-autotune escapes=0")
+      (newline))
+    (begin
+      (display "FAIL: agent-autotune denseness probe")
+      (newline)
+      (display "RESULT fail example=05-agent-autotune")
+      (newline)
+      (display "  base=")
+      (display base-high)
+      (display " refuse=")
+      (display bad-refuse)
+      (display " rb=")
+      (display worse-rb)
+      (display " tune=")
+      (display tune-ok)
+      (display " v-ok=")
+      (display v-ok)
+      (display " skip=")
+      (display skip-ok)
+      (display " analytic=")
+      (display analytic-ok)
+      (display " metrics=")
+      (display metrics-ok)
+      (display " esc=")
+      (display esc-ok)
+      (newline))))

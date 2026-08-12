@@ -2,14 +2,16 @@
 ;
 ; (require "tran" all:)
 ;
-; Backward Euler, fixed dt, integer nsteps.
+; Backward Euler, fixed dt.
+; nsteps may be integer or float (e.g. from tstop/dt); coerced to exact int.
 ; Initial node voltages and L currents default to 0 (zero-state).
-;
-; Host note: make-vector requires an integer length; floor() returns float,
-; so callers pass integer nsteps (not tstop-derived floor).
+; Host: make-vector accepts integer-valued floats (aura#2965); vector-ref
+; still needs a true integer index → use inexact->exact after round.
 
 (export daed:tran-version
         daed:make-tran-state
+        daed:nsteps-for
+        daed:as-int
         daed:simulate-tran
         daed:tran-ok?
         daed:tran-dt
@@ -25,6 +27,20 @@
 (require "solve" all:)
 
 (define daed:tran-version 1)
+
+; Nearest exact integer (vector indices / make-vector lengths).
+(define (daed:as-int n)
+  (if (not (number? n))
+    0
+    (inexact->exact (round n))))
+
+; Step count from horizon: round(tstop/dt) as exact int.
+; Prefer round over floor — float division often yields 499.999… for exact 500.
+(define (daed:nsteps-for tstop dt)
+  (if (or (not (number? tstop)) (not (number? dt))
+          (<= dt 0.0) (< tstop 0.0))
+    0
+    (daed:as-int (/ tstop dt))))
 
 ; Allocate zero-state: v[node]=0, iL[name]=0 for each L.
 (define (daed:make-tran-state comps)
@@ -93,7 +109,7 @@
         (set! node (+ node 1)))))
   #t)
 
-; Fixed-step .tran: nsteps is a non-negative integer.
+; Fixed-step .tran: nsteps is non-negative (int or float; coerced via round).
 ; Samples: t=0 plus nsteps ends → length nsteps+1.
 ; Returns hash: ok, dt, tstop, nsteps, times, series, n_v, final
 (define (daed:simulate-tran ckt dt nsteps)
@@ -110,9 +126,9 @@
         (hash-set! res "series" (hash))
         (hash-set! res "n_v" 0)
         res)
+      ; Coerce float step counts to exact int (vector-ref needs integer indices).
       (let ((n-v (daed:n-voltage-unknowns comps))
-            ; nsteps must be integer for make-vector; callers pass integer literals.
-            (ns nsteps))
+            (ns (daed:as-int nsteps)))
         (let ((nsamp (+ ns 1))
               (tstop (* dt ns))
               (state (daed:make-tran-state comps))
@@ -171,10 +187,11 @@
     (hash-ref series (number->string node) (make-vector 0 0.0))))
 
 (define (daed:tran-v-at res node k)
-  (let ((wv (daed:tran-series res node)))
-    (if (or (< k 0) (>= k (vector-length wv)))
+  (let ((wv (daed:tran-series res node))
+        (ki (daed:as-int k)))
+    (if (or (< ki 0) (>= ki (vector-length wv)))
       0.0
-      (vector-ref wv k))))
+      (vector-ref wv ki))))
 
 (define (daed:tran-v res node)
   (let ((wv (daed:tran-series res node)))

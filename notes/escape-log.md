@@ -20,6 +20,18 @@ No leave from \(V_A\). Linear MNA stamp + dense GE (`.op`) are pure Aura.
 No leave from \(V_A\). Fixed-step Backward Euler companions (C/L), current sources, and
 `.tran` time-stepping are pure Aura.
 
+## Phase 3
+
+No leave from \(V_A\). Parameter mutate, topology guards, and dual snapshot/rollback
+(circuit clone + denseness metrics) are pure Aura. Host `ast:snapshot` is best-effort
+only (often returns `-1` offline); circuit-domain rollback does not depend on it.
+
+## Phase 4
+
+No leave from \(V_A\). Agent O→D→M→V→R (`loop-once` / `autotune!`) uses pure-Aura
+observe, propose, mutate, and circuit-only rollback. Aether is composed as a **pattern**,
+not as a required host rebind path.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

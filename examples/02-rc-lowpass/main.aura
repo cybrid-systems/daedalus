@@ -69,17 +69,18 @@
   (newline)
 
   ; ── 2. .tran fixed-step ──
-  ; dt = τ/100, nsteps = 500 → tstop = 5τ (integer nsteps for make-vector)
-  (let* ((nsteps 500)
-         (dt (/ tau 100.0))
+  ; dt = τ/100, tstop = 5τ → nsteps via round(tstop/dt) (aura#2965 float lengths OK)
+  (let* ((dt (/ tau 100.0))
+         (tstop (* 5.0 tau))
+         (nsteps (daed:nsteps-for tstop dt))
          (tr (daed:simulate-tran ckt dt nsteps)))
     (daed:stats-bump! "sim_runs")
     (let* ((tr-ok-flag (daed:tran-ok? tr))
            (got-steps (daed:tran-nsteps tr))
            (tr-flag (daed:check-true tr-ok-flag))
            (steps-ok (daed:check-eq got-steps 500))
-           ; sample at t = τ → step index 100
-           (k-tau 100)
+           ; sample at t = τ → step index round(τ/dt)
+           (k-tau (daed:nsteps-for tau dt))
            (v-tau (daed:tran-v-at tr 2 k-tau))
            (want-tau (* Vin (- 1.0 (exp -1.0))))
            (tau-ok (daed:check-rel v-tau want-tau 0.05 1e-6))
