@@ -201,6 +201,13 @@ Phase 4 agent auto-tune closed loop:
 ./scripts/run-aura.sh examples/05-agent-autotune/main.aura
 ```
 
+Bidirectional netlist ↔ HTML visualization ([issue #1](https://github.com/cybrid-systems/daedalus/issues/1)):
+
+```bash
+./scripts/run-aura.sh examples/06-viz-bidirectional/main.aura
+# open examples/06-viz-bidirectional/out/*.html in a browser
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

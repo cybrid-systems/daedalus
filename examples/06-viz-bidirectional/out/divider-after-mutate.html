@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Daedalus — divider</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;padding:1.25rem;background:#0f172a;color:#e2e8f0;}
+h1{font-size:1.25rem;margin:0 0 .5rem;font-weight:600;}
+.sub{color:#94a3b8;font-size:.9rem;margin-bottom:1rem;}
+.card{background:#1e293b;border-radius:12px;padding:1rem;margin-bottom:1rem;box-shadow:0 8px 24px rgba(0,0,0,.35);}
+.schematic{background:#f8fafc;border-radius:8px;display:block;}
+.nl,.ct,.cv{font-family:ui-sans-serif,system-ui,sans-serif;font-size:12px;}
+.nl{fill:#0f172a;font-weight:600;}
+.cv{fill:#475569;font-size:11px;}
+h2{font-size:1rem;margin:0 0 .75rem;}
+.params{display:grid;gap:.6rem;}
+.param{display:grid;grid-template-columns:7rem 1fr 2rem;gap:.5rem;align-items:center;}
+.param input{padding:.4rem .5rem;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;}
+.pt{color:#cbd5e1;font-size:.9rem;}
+.pu{color:#94a3b8;font-size:.85rem;}
+button{margin-top:.75rem;margin-right:.5rem;padding:.5rem .9rem;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;}
+button.secondary{background:#334155;}
+pre{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:.75rem;overflow:auto;font-size:.8rem;color:#a5b4fc;}
+.hint{color:#94a3b8;font-size:.85rem;margin-top:.5rem;line-height:1.4;}
+.badge{display:inline-block;background:#14532d;color:#bbf7d0;padding:.15rem .5rem;border-radius:999px;font-size:.75rem;margin-left:.5rem;}
+</style>
+</head>
+<body>
+<h1>Daedalus — divider<span class="badge">viz v1</span></h1>
+<p class="sub">Bidirectional preview · netlist → HTML · .op voltages shown · edit values then export JSON for Aura apply</p>
+<div class="card"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 340" width="100%" class="schematic" role="img" aria-label="circuit schematic"><rect width="100%" height="100%" fill="#f8fafc"/><line x1="40" y1="200" x2="530" y2="200" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 4"/><g class="comp" data-name="vin" data-type="V" data-value="5"><line x1="230" y1="200" x2="80" y2="200" stroke="#64748b" stroke-width="2"/><rect x="119" y="154" width="72" height="36" rx="6" fill="#fff" stroke="#be123c" stroke-width="2"/><text x="155" y="170" text-anchor="middle" class="ct" fill="#be123c">V vin</text><text x="155" y="184" text-anchor="middle" class="cv">5V</text></g><g class="comp" data-name="r1" data-type="R" data-value="1000"><line x1="230" y1="200" x2="380" y2="200" stroke="#64748b" stroke-width="2"/><rect x="269" y="154" width="72" height="36" rx="6" fill="#fff" stroke="#b45309" stroke-width="2"/><text x="305" y="170" text-anchor="middle" class="ct" fill="#b45309">R r1</text><text x="305" y="184" text-anchor="middle" class="cv">1000Ω</text></g><g class="comp" data-name="r2" data-type="R" data-value="1000"><line x1="380" y1="200" x2="80" y2="200" stroke="#64748b" stroke-width="2"/><rect x="194" y="154" width="72" height="36" rx="6" fill="#fff" stroke="#b45309" stroke-width="2"/><text x="230" y="170" text-anchor="middle" class="ct" fill="#b45309">R r2</text><text x="230" y="184" text-anchor="middle" class="cv">1000Ω</text></g><g class="node gnd" data-node="0"><line x1="80" y1="200" x2="80" y2="260" stroke="#334" stroke-width="2"/><line x1="62" y1="260" x2="98" y2="260" stroke="#334" stroke-width="3"/><line x1="68" y1="268" x2="92" y2="268" stroke="#334" stroke-width="2"/><line x1="74" y1="276" x2="86" y2="276" stroke="#334" stroke-width="2"/><text x="80" y="296" text-anchor="middle" class="nl">GND</text></g><g class="node" data-node="1"><circle cx="230" cy="200" r="10" fill="#e8f0fe" stroke="#1a56db" stroke-width="2"/><text x="230" y="182" text-anchor="middle" class="nl">n1 5 V</text></g><g class="node" data-node="2"><circle cx="380" cy="200" r="10" fill="#e8f0fe" stroke="#1a56db" stroke-width="2"/><text x="380" y="182" text-anchor="middle" class="nl">n2 2.5 V</text></g></svg></div>
+<div class="card">
+<h2>Parameters (edit-back)</h2>
+<div class="params" id="params"><label class="param" data-name="vin"><span class="pt">V <strong>vin</strong></span><input type="number" step="any" data-comp="vin" value="5"/><span class="pu">V</span></label><label class="param" data-name="r1"><span class="pt">R <strong>r1</strong></span><input type="number" step="any" data-comp="r1" value="1000"/><span class="pu">Ω</span></label><label class="param" data-name="r2"><span class="pt">R <strong>r2</strong></span><input type="number" step="any" data-comp="r2" value="1000"/><span class="pu">Ω</span></label></div>
+<button type="button" id="btn-export">Export edits JSON</button>
+<button type="button" class="secondary" id="btn-copy">Copy Aura apply form</button>
+<p class="hint">P2 protocol: copy the JSON / form below into an Aura session and call <code>daed:apply-viz-edits!</code> (snapshot + safe mutate + rollback on bad values). Live HTTP postMessage can wrap the same payload later.</p>
+<pre id="out">[]</pre>
+</div>
+<script type="application/json" id="ckt-data">{"name":"divider","comps":[{"name":"vin","type":"V","n1":1,"n2":0,"value":5},{"name":"r1","type":"R","n1":1,"n2":2,"value":1000},{"name":"r2","type":"R","n1":2,"n2":0,"value":1000}],"volts":{"0":0,"1":5,"2":2.5}}</script>
+<script>
+(function(){
+  function collect(){
+    var inputs=document.querySelectorAll('input[data-comp]');
+    var edits=[];
+    inputs.forEach(function(inp){
+      var v=parseFloat(inp.value);
+      if(!isNaN(v)) edits.push({name:inp.getAttribute('data-comp'),value:v});
+    });
+    return edits;
+  }
+  function show(){
+    var edits=collect();
+    var json=JSON.stringify(edits,null,2);
+    var form=';; paste into Aura denseness session\n'+
+      '(define edits (list ' + edits.map(function(e){
+        return '(list "'+e.name+'" '+e.value+')';
+      }).join(' ') + '))\n'+
+      '(define r (daed:apply-viz-edits! ckt edits))\n';
+    document.getElementById('out').textContent=json+'\n\n'+form;
+    return {edits:edits,json:json,form:form};
+  }
+  document.getElementById('btn-export').onclick=show;
+  document.getElementById('btn-copy').onclick=function(){
+    var s=show();
+    if(navigator.clipboard) navigator.clipboard.writeText(s.form);
+  };
+  // local label refresh on input
+  document.querySelectorAll('input[data-comp]').forEach(function(inp){
+    inp.addEventListener('change',function(){
+      var g=document.querySelector('g.comp[data-name="'+inp.getAttribute('data-comp')+'"]');
+      if(!g) return;
+      g.setAttribute('data-value', inp.value);
+      var t=g.querySelectorAll('text.cv')[0];
+      if(t){ var u=(t.textContent.match(/[^0-9eE+\-.]+$/)||[''])[0]; t.textContent=inp.value+u; }
+    });
+  });
+  show();
+})();
+</script>
+</body>
+</html>

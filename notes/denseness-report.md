@@ -38,6 +38,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [02](../examples/02-rc-lowpass/) | `.op` + `.tran` | **PASS** | 0 | 0 |
 | [03](../examples/03-mutate-resistor/) | mutate + dual rollback | **PASS** | 0 | 0 |
 | [05](../examples/05-agent-autotune/) | O→D→M→V→R | **PASS** | 0 | 0 |
+| [06](../examples/06-viz-bidirectional/) | netlist ↔ HTML (issue #1) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 

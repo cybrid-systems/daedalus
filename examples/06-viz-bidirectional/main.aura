@@ -1,0 +1,165 @@
+; examples/06-viz-bidirectional/main.aura
+;
+; Issue #1 denseness probe — netlist ↔ HTML bidirectional preview.
+; P0: circuit→html with .op voltages
+; P1: mutate → re-sim → re-emit reflects new values
+; P2: apply-viz-edits! safe mutate + rollback on bad input
+;
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/06-viz-bidirectional/main.aura
+; HTML artifacts: examples/06-viz-bidirectional/out/
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 06-viz-bidirectional: netlist ↔ HTML ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " viz=")
+(display daed:viz-version)
+(newline)
+
+; ── Divider ──
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-0 (daed:v op0 2))
+(define html0 (daed:circuit->html ckt op0))
+(define w0 (write-file "examples/06-viz-bidirectional/out/divider-before.html" html0))
+
+(define has-name (daed:check-true (daed:string-has? html0 "divider")))
+(define has-r1 (daed:check-true (daed:string-has? html0 "r1")))
+(define has-r2 (daed:check-true (daed:string-has? html0 "r2")))
+(define has-v (daed:check-true (daed:string-has? html0 "3.333")))
+(define has-svg (daed:check-true (daed:string-has? html0 "<svg")))
+(define wrote0 (daed:check-true (and (number? w0) (> w0 0))))
+
+(display "divider html len=")
+(display (string-length html0))
+(display " v2=")
+(display v2-0)
+(display " wrote=")
+(display w0)
+(newline)
+
+; ── P1: mutate then re-emit ──
+(define mut (daed:mutate! ckt "r2" 1e3))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define op1 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-1 (daed:v op1 2))
+(define html1 (daed:circuit->html ckt op1))
+(define w1 (write-file "examples/06-viz-bidirectional/out/divider-after-mutate.html" html1))
+(define mut-v-ok (daed:check-approx v2-1 2.5 1e-3))
+(define html-new-r (daed:check-true (daed:string-has? html1 "1000")))
+(define html-new-v (daed:check-true (daed:string-has? html1 "2.5")))
+
+(display "after mutate v2=")
+(display v2-1)
+(display " html has 2.5=")
+(display (daed:string-has? html1 "2.5"))
+(newline)
+
+; ── P2: bad edit → rollback ──
+(define bad (daed:apply-viz-edits! ckt (list (list "r2" -5.0))))
+(define bad-rej (daed:check-true (not (daed:viz-edit-ok? bad))))
+(define r2-still (daed:comp-value (daed:find-comp ckt "r2")))
+(define bad-rb (daed:check-approx r2-still 1e3 1e-9))
+
+(display "bad edit ok=")
+(display (daed:viz-edit-ok? bad))
+(display " reason=")
+(display (daed:viz-edit-reason bad))
+(display " r2=")
+(display r2-still)
+(newline)
+
+; ── P2: good multi-edit ──
+(define good (daed:apply-viz-edits! ckt (list (list "r1" 2e3) (list "r2" 2e3))))
+(define good-ok (daed:check-true (daed:viz-edit-ok? good)))
+(define applied-ok (daed:check-eq (daed:viz-edit-applied good) 2))
+(define op2 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-2 (daed:v op2 2))
+; Vin * 2k/(2k+2k) = 2.5
+(define v2-edit-ok (daed:check-approx v2-2 2.5 1e-3))
+(define html2 (daed:circuit->html ckt op2))
+(define w2 (write-file "examples/06-viz-bidirectional/out/divider-after-edits.html" html2))
+
+(display "good edits applied=")
+(display (daed:viz-edit-applied good))
+(display " v2=")
+(display v2-2)
+(newline)
+
+; ── RC low-pass HTML ──
+(define rc
+  (daed:circuit "rc-lp"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 1e-6))))
+(define op-rc (daed:simulate-op rc))
+(daed:stats-bump! "sim_runs")
+(define html-rc (daed:circuit->html rc op-rc))
+(define w-rc (write-file "examples/06-viz-bidirectional/out/rc-lowpass.html" html-rc))
+(define rc-has-c (daed:check-true (daed:string-has? html-rc "c1")))
+(define rc-has-v (daed:check-true (daed:string-has? html-rc "5")))
+
+(display "rc html len=")
+(display (string-length html-rc))
+(display " wrote=")
+(display w-rc)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(let ((all-ok
+        (and has-name has-r1 has-r2 has-v has-svg wrote0
+             mut-ok mut-v-ok html-new-r html-new-v
+             bad-rej bad-rb
+             good-ok applied-ok v2-edit-ok
+             rc-has-c rc-has-v
+             esc-ok
+             (= (daed:stats-ref "correctness_fail") 0)
+             (>= (daed:stats-ref "correctness_ok") 14)
+             (= (daed:escape-count) 0))))
+  (if all-ok
+    (begin
+      (display "PASS: viz bidirectional netlist↔HTML (escapes=0)")
+      (newline)
+      (display "RESULT pass example=06-viz-bidirectional escapes=0")
+      (newline))
+    (begin
+      (display "FAIL: viz-bidirectional denseness probe")
+      (newline)
+      (display "RESULT fail example=06-viz-bidirectional")
+      (newline)
+      (display "  has-v=")
+      (display has-v)
+      (display " mut=")
+      (display mut-ok)
+      (display " html-new-v=")
+      (display html-new-v)
+      (display " bad-rej=")
+      (display bad-rej)
+      (display " good=")
+      (display good-ok)
+      (display " rc=")
+      (display rc-has-c)
+      (display " esc=")
+      (display esc-ok)
+      (newline))))

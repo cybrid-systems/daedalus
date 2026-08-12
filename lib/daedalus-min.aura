@@ -58,7 +58,13 @@
         daed:propose-r-scale daed:propose-divider-bottom-r
         daed:loop-once daed:agent-step! daed:autotune daed:autotune!
         daed:step-ok? daed:step-decision daed:step-v daed:step-reason
-        daed:tune-ok? daed:tune-steps daed:tune-v daed:tune-reached?)
+        daed:tune-ok? daed:tune-steps daed:tune-v daed:tune-reached?
+        ; viz (issue #1)
+        daed:viz-version
+        daed:string-has? daed:num->str
+        daed:circuit->svg daed:circuit->html daed:html-after-op
+        daed:apply-viz-edits!
+        daed:viz-edit-ok? daed:viz-edit-applied daed:viz-edit-reason)
 
 (require "netlist" all:)
 (require "stamp" all:)
@@ -67,8 +73,9 @@
 (require "probe" all:)
 (require "mutate-circuit" all:)
 (require "agent" all:)
+(require "viz" all:)
 
-; 4 = Phase 4 agent auto-tune closed loop (O→D→M→V→R)
+; 4 = Phase 4 agent auto-tune; viz is issue #1 (not a denseness phase bump)
 (define daed:min-version 4)
 
 ; ── Alist helper ──

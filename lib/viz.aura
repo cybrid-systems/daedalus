@@ -1,0 +1,419 @@
+; lib/viz.aura — Netlist ↔ HTML visualization (issue #1)
+;
+; (require "viz" all:)
+;
+; P0: circuit→self-contained HTML/SVG
+; P1: overlay .op voltages; regenerate after mutate
+; P2: structured edit payload + safe apply (mutate + snapshot/rollback)
+;
+; Layout is intentionally naive (node id → horizontal slot). Pure Aura, E=0.
+
+(export daed:viz-version
+        daed:string-has?
+        daed:num->str
+        daed:node-x
+        daed:node-y
+        daed:circuit->svg
+        daed:circuit->html
+        daed:html-after-op
+        daed:apply-viz-edits!
+        daed:viz-edit-ok?
+        daed:viz-edit-applied
+        daed:viz-edit-reason)
+
+(require "netlist" all:)
+(require "solve" all:)
+(require "probe" all:)
+(require "mutate-circuit" all:)
+
+(define daed:viz-version 1)
+
+; ── String helpers ──
+
+(define (daed:string-has? s sub)
+  (let ((n (string-length s))
+        (m (string-length sub))
+        (found #f)
+        (i 0))
+    (if (or (not (string? s)) (not (string? sub)) (> m n))
+      #f
+      (begin
+        (while (lambda () (and (not found) (<= i (- n m))))
+          (lambda ()
+            (if (equal? (substring s i (+ i m)) sub)
+              (set! found #t)
+              0)
+            (set! i (+ i 1))))
+        found))))
+
+(define (daed:num->str x)
+  (if (number? x)
+    (number->string x)
+    (if (string? x) x "")))
+
+; ── Layout (naive) ──
+; Node k at x=80+k*150, y=200. GND symbol below.
+
+(define (daed:node-x node)
+  (+ 80 (* node 150)))
+
+(define (daed:node-y node)
+  (if (<= node 0) 280 200))
+
+(define (daed:svg-esc s)
+  ; names are simple alphanumerics in probes; pass through
+  (if (string? s) s ""))
+
+; ── SVG fragments ──
+
+(define (daed:svg-node node volts-hash)
+  (let ((x (daed:node-x node))
+        (y (daed:node-y node))
+        (lab (if (<= node 0) "GND" (string-append "n" (daed:num->str node))))
+        (vv ""))
+    (if (and volts-hash (> node 0))
+      (let ((v (hash-ref volts-hash (number->string node) #f)))
+        (if (number? v)
+          (set! vv (string-append " " (daed:num->str v) " V"))
+          0))
+      0)
+    (if (<= node 0)
+      (string-append
+        "<g class=\"node gnd\" data-node=\"0\">"
+        "<line x1=\"" (daed:num->str x) "\" y1=\"200\" x2=\"" (daed:num->str x)
+        "\" y2=\"260\" stroke=\"#334\" stroke-width=\"2\"/>"
+        "<line x1=\"" (daed:num->str (- x 18)) "\" y1=\"260\" x2=\""
+        (daed:num->str (+ x 18)) "\" y2=\"260\" stroke=\"#334\" stroke-width=\"3\"/>"
+        "<line x1=\"" (daed:num->str (- x 12)) "\" y1=\"268\" x2=\""
+        (daed:num->str (+ x 12)) "\" y2=\"268\" stroke=\"#334\" stroke-width=\"2\"/>"
+        "<line x1=\"" (daed:num->str (- x 6)) "\" y1=\"276\" x2=\""
+        (daed:num->str (+ x 6)) "\" y2=\"276\" stroke=\"#334\" stroke-width=\"2\"/>"
+        "<text x=\"" (daed:num->str x) "\" y=\"296\" text-anchor=\"middle\" class=\"nl\">GND</text>"
+        "</g>")
+      (string-append
+        "<g class=\"node\" data-node=\"" (daed:num->str node) "\">"
+        "<circle cx=\"" (daed:num->str x) "\" cy=\"" (daed:num->str y)
+        "\" r=\"10\" fill=\"#e8f0fe\" stroke=\"#1a56db\" stroke-width=\"2\"/>"
+        "<text x=\"" (daed:num->str x) "\" y=\"" (daed:num->str (- y 18))
+        "\" text-anchor=\"middle\" class=\"nl\">" lab vv "</text>"
+        "</g>"))))
+
+(define (daed:comp-unit type)
+  (if (equal? type "R") "Ω"
+    (if (equal? type "C") "F"
+      (if (equal? type "L") "H"
+        (if (equal? type "V") "V"
+          (if (equal? type "I") "A" ""))))))
+
+(define (daed:comp-color type)
+  (if (equal? type "R") "#b45309"
+    (if (equal? type "C") "#0e7490"
+      (if (equal? type "L") "#6d28d9"
+        (if (equal? type "V") "#be123c"
+          (if (equal? type "I") "#047857" "#334"))))))
+
+(define (daed:svg-comp c)
+  (let ((n1 (daed:comp-n1 c))
+        (n2 (daed:comp-n2 c))
+        (ty (daed:comp-type c))
+        (nm (daed:comp-name c))
+        (val (daed:comp-value c)))
+    (let ((x1 (daed:node-x n1))
+          (y1 (daed:node-y n1))
+          (x2 (daed:node-x n2))
+          (y2 (daed:node-y n2)))
+      ; GND terminals sit on the horizontal bus for edge routing
+      (if (<= n1 0) (begin (set! y1 200) (set! x1 (daed:node-x 0))) 0)
+      (if (<= n2 0) (begin (set! y2 200) (set! x2 (daed:node-x 0))) 0)
+      (let ((mx (/ (+ x1 x2) 2.0))
+            (my (- (/ (+ y1 y2) 2.0) 28))
+            (col (daed:comp-color ty))
+            (lab (string-append ty " " nm))
+            (vlab (string-append (daed:num->str val) (daed:comp-unit ty))))
+        (string-append
+          "<g class=\"comp\" data-name=\"" (daed:svg-esc nm)
+          "\" data-type=\"" (daed:svg-esc ty)
+          "\" data-value=\"" (daed:num->str val) "\">"
+          "<line x1=\"" (daed:num->str x1) "\" y1=\"" (daed:num->str y1)
+          "\" x2=\"" (daed:num->str x2) "\" y2=\"" (daed:num->str y2)
+          "\" stroke=\"#64748b\" stroke-width=\"2\"/>"
+          "<rect x=\"" (daed:num->str (- mx 36)) "\" y=\"" (daed:num->str (- my 18))
+          "\" width=\"72\" height=\"36\" rx=\"6\" fill=\"#fff\" stroke=\"" col
+          "\" stroke-width=\"2\"/>"
+          "<text x=\"" (daed:num->str mx) "\" y=\"" (daed:num->str (- my 2))
+          "\" text-anchor=\"middle\" class=\"ct\" fill=\"" col "\">" lab "</text>"
+          "<text x=\"" (daed:num->str mx) "\" y=\"" (daed:num->str (+ my 12))
+          "\" text-anchor=\"middle\" class=\"cv\">" vlab "</text>"
+          "</g>")))))
+
+(define (daed:svg-nodes-html maxn volts)
+  (let ((acc "")
+        (k 0))
+    (while (lambda () (<= k maxn))
+      (lambda ()
+        (set! acc (string-append acc (daed:svg-node k volts)))
+        (set! k (+ k 1))))
+    acc))
+
+(define (daed:svg-comps-html comps)
+  (let ((acc ""))
+    (let loop ((cs comps))
+      (if (null? cs)
+        acc
+        (begin
+          (set! acc (string-append acc (daed:svg-comp (car cs))))
+          (loop (cdr cs)))))))
+
+(define (daed:circuit->svg ckt results)
+  (let ((comps (daed:ckt-comps ckt))
+        (maxn (daed:max-node (daed:ckt-comps ckt)))
+        (volts #f))
+    (if results
+      (set! volts (hash-ref results "volts" #f))
+      0)
+    (if (not volts)
+      (if (and results (hash-ref results "ok" #f))
+        (set! volts (hash-ref results "volts" #f))
+        0)
+      0)
+    (let ((w (+ 120 (* (+ maxn 1) 150)))
+          (h 340))
+      (string-append
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
+        (daed:num->str w) " " (daed:num->str h)
+        "\" width=\"100%\" class=\"schematic\" role=\"img\" aria-label=\"circuit schematic\">"
+        "<rect width=\"100%\" height=\"100%\" fill=\"#f8fafc\"/>"
+        ; bus line
+        "<line x1=\"40\" y1=\"200\" x2=\"" (daed:num->str (- w 40))
+        "\" y2=\"200\" stroke=\"#cbd5e1\" stroke-width=\"1\" stroke-dasharray=\"4 4\"/>"
+        (daed:svg-comps-html comps)
+        (daed:svg-nodes-html maxn volts)
+        "</svg>"))))
+
+; Params panel HTML + embedded JSON for edit-back (P2 client half)
+
+(define (daed:params-inputs-html comps)
+  (let ((acc ""))
+    (let loop ((cs comps))
+      (if (null? cs)
+        acc
+        (let ((c (car cs)))
+          (let ((nm (daed:comp-name c))
+                (ty (daed:comp-type c))
+                (val (daed:comp-value c)))
+            (set! acc
+              (string-append acc
+                "<label class=\"param\" data-name=\"" nm "\">"
+                "<span class=\"pt\">" ty " <strong>" nm "</strong></span>"
+                "<input type=\"number\" step=\"any\" data-comp=\"" nm
+                "\" value=\"" (daed:num->str val) "\"/>"
+                "<span class=\"pu\">" (daed:comp-unit ty) "</span>"
+                "</label>"))
+            (loop (cdr cs))))))))
+
+(define (daed:comps-json comps)
+  (let ((acc "[")
+        (first #t))
+    (let loop ((cs comps))
+      (if (null? cs)
+        (string-append acc "]")
+        (let ((c (car cs)))
+          (if first (set! first #f) (set! acc (string-append acc ",")))
+          (set! acc
+            (string-append acc
+              "{\"name\":\"" (daed:comp-name c)
+              "\",\"type\":\"" (daed:comp-type c)
+              "\",\"n1\":" (daed:num->str (daed:comp-n1 c))
+              ",\"n2\":" (daed:num->str (daed:comp-n2 c))
+              ",\"value\":" (daed:num->str (daed:comp-value c))
+              "}"))
+          (loop (cdr cs)))))))
+
+(define (daed:volts-json results)
+  (if (not results)
+    "{}"
+    (let ((volts (hash-ref results "volts" #f)))
+      (if (not volts)
+        "{}"
+        ; fixed small set n0..n8 for denseness HTML (enough for probes)
+        (let ((acc "{")
+              (first #t)
+              (k 0))
+          (while (lambda () (<= k 8))
+            (lambda ()
+              (let ((v (hash-ref volts (number->string k) #f)))
+                (if (number? v)
+                  (begin
+                    (if first (set! first #f) (set! acc (string-append acc ",")))
+                    (set! acc
+                      (string-append acc "\"" (number->string k) "\":"
+                                     (daed:num->str v))))
+                  0))
+              (set! k (+ k 1))))
+          (string-append acc "}"))))))
+
+(define (daed:circuit->html ckt results)
+  (let ((name (daed:ckt-name ckt))
+        (comps (daed:ckt-comps ckt))
+        (svg (daed:circuit->svg ckt results))
+        (title (string-append "Daedalus — " (daed:ckt-name ckt))))
+    (string-append
+      "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
+      "<meta charset=\"utf-8\"/>\n"
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+      "<title>" title "</title>\n"
+      "<style>\n"
+      "body{font-family:system-ui,sans-serif;margin:0;padding:1.25rem;background:#0f172a;color:#e2e8f0;}\n"
+      "h1{font-size:1.25rem;margin:0 0 .5rem;font-weight:600;}\n"
+      ".sub{color:#94a3b8;font-size:.9rem;margin-bottom:1rem;}\n"
+      ".card{background:#1e293b;border-radius:12px;padding:1rem;margin-bottom:1rem;"
+      "box-shadow:0 8px 24px rgba(0,0,0,.35);}\n"
+      ".schematic{background:#f8fafc;border-radius:8px;display:block;}\n"
+      ".nl,.ct,.cv{font-family:ui-sans-serif,system-ui,sans-serif;font-size:12px;}\n"
+      ".nl{fill:#0f172a;font-weight:600;}\n"
+      ".cv{fill:#475569;font-size:11px;}\n"
+      "h2{font-size:1rem;margin:0 0 .75rem;}\n"
+      ".params{display:grid;gap:.6rem;}\n"
+      ".param{display:grid;grid-template-columns:7rem 1fr 2rem;gap:.5rem;align-items:center;}\n"
+      ".param input{padding:.4rem .5rem;border-radius:6px;border:1px solid #334155;"
+      "background:#0f172a;color:#e2e8f0;}\n"
+      ".pt{color:#cbd5e1;font-size:.9rem;}\n"
+      ".pu{color:#94a3b8;font-size:.85rem;}\n"
+      "button{margin-top:.75rem;margin-right:.5rem;padding:.5rem .9rem;border:0;border-radius:8px;"
+      "background:#2563eb;color:#fff;font-weight:600;cursor:pointer;}\n"
+      "button.secondary{background:#334155;}\n"
+      "pre{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:.75rem;"
+      "overflow:auto;font-size:.8rem;color:#a5b4fc;}\n"
+      ".hint{color:#94a3b8;font-size:.85rem;margin-top:.5rem;line-height:1.4;}\n"
+      ".badge{display:inline-block;background:#14532d;color:#bbf7d0;padding:.15rem .5rem;"
+      "border-radius:999px;font-size:.75rem;margin-left:.5rem;}\n"
+      "</style>\n</head>\n<body>\n"
+      "<h1>" title "<span class=\"badge\">viz v" (daed:num->str daed:viz-version) "</span></h1>\n"
+      "<p class=\"sub\">Bidirectional preview · netlist → HTML"
+      (if results " · .op voltages shown" "")
+      " · edit values then export JSON for Aura apply</p>\n"
+      "<div class=\"card\">" svg "</div>\n"
+      "<div class=\"card\">\n"
+      "<h2>Parameters (edit-back)</h2>\n"
+      "<div class=\"params\" id=\"params\">"
+      (daed:params-inputs-html comps)
+      "</div>\n"
+      "<button type=\"button\" id=\"btn-export\">Export edits JSON</button>\n"
+      "<button type=\"button\" class=\"secondary\" id=\"btn-copy\">Copy Aura apply form</button>\n"
+      "<p class=\"hint\">P2 protocol: copy the JSON / form below into an Aura session and call "
+      "<code>daed:apply-viz-edits!</code> (snapshot + safe mutate + rollback on bad values). "
+      "Live HTTP postMessage can wrap the same payload later.</p>\n"
+      "<pre id=\"out\">[]</pre>\n"
+      "</div>\n"
+      "<script type=\"application/json\" id=\"ckt-data\">"
+      "{\"name\":\"" name "\",\"comps\":" (daed:comps-json comps)
+      ",\"volts\":" (daed:volts-json results) "}"
+      "</script>\n"
+      "<script>\n"
+      "(function(){\n"
+      "  function collect(){\n"
+      "    var inputs=document.querySelectorAll('input[data-comp]');\n"
+      "    var edits=[];\n"
+      "    inputs.forEach(function(inp){\n"
+      "      var v=parseFloat(inp.value);\n"
+      "      if(!isNaN(v)) edits.push({name:inp.getAttribute('data-comp'),value:v});\n"
+      "    });\n"
+      "    return edits;\n"
+      "  }\n"
+      "  function show(){\n"
+      "    var edits=collect();\n"
+      "    var json=JSON.stringify(edits,null,2);\n"
+      "    var form=';; paste into Aura denseness session\\n'+\n"
+      "      '(define edits (list ' + edits.map(function(e){\n"
+      "        return '(list \"'+e.name+'\" '+e.value+')';\n"
+      "      }).join(' ') + '))\\n'+\n"
+      "      '(define r (daed:apply-viz-edits! ckt edits))\\n';\n"
+      "    document.getElementById('out').textContent=json+'\\n\\n'+form;\n"
+      "    return {edits:edits,json:json,form:form};\n"
+      "  }\n"
+      "  document.getElementById('btn-export').onclick=show;\n"
+      "  document.getElementById('btn-copy').onclick=function(){\n"
+      "    var s=show();\n"
+      "    if(navigator.clipboard) navigator.clipboard.writeText(s.form);\n"
+      "  };\n"
+      "  // local label refresh on input\n"
+      "  document.querySelectorAll('input[data-comp]').forEach(function(inp){\n"
+      "    inp.addEventListener('change',function(){\n"
+      "      var g=document.querySelector('g.comp[data-name=\"'+inp.getAttribute('data-comp')+'\"]');\n"
+      "      if(!g) return;\n"
+      "      g.setAttribute('data-value', inp.value);\n"
+      "      var t=g.querySelectorAll('text.cv')[0];\n"
+      "      if(t){ var u=(t.textContent.match(/[^0-9eE+\\-.]+$/)||[''])[0]; t.textContent=inp.value+u; }\n"
+      "    });\n"
+      "  });\n"
+      "  show();\n"
+      "})();\n"
+      "</script>\n"
+      "</body>\n</html>\n")))
+
+; Convenience: simulate .op then emit HTML
+(define (daed:html-after-op ckt)
+  (daed:circuit->html ckt (daed:simulate-op ckt)))
+
+; ── P2 edit-back (Aura side) ──
+; edits: list of (list name value)  e.g. (list (list "r2" 1000.0))
+; Returns hash: ok, applied, reason, refused
+
+(define (daed:apply-viz-edits! ckt edits)
+  (let ((res (hash))
+        (applied 0)
+        (snap (daed:circuit-snapshot ckt))
+        (ok #t)
+        (reason "ok"))
+    (hash-set! res "ok" #f)
+    (hash-set! res "applied" 0)
+    (hash-set! res "reason" "init")
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (begin
+        (let loop ((es edits))
+          (if (or (not ok) (null? es))
+            0
+            (let ((e (car es)))
+              (let ((nm (if (pair? e) (car e) #f))
+                    (val (if (and (pair? e) (pair? (cdr e))) (car (cdr e)) #f)))
+                ; also accept (cons name value)
+                (if (and (pair? e) (not (list? (cdr e))))
+                  (begin (set! nm (car e)) (set! val (cdr e)))
+                  0)
+                (if (or (not (string? nm)) (not (number? val)))
+                  (begin
+                    (set! ok #f)
+                    (set! reason "bad-edit-form"))
+                  (let ((m (daed:mutate-value! ckt nm val)))
+                    (if (hash-ref m "ok" #f)
+                      (set! applied (+ applied 1))
+                      (begin
+                        (set! ok #f)
+                        (set! reason (hash-ref m "reason" "mutate-failed"))))))
+                (if ok
+                  (loop (cdr es))
+                  0)))))
+        (if ok
+          (begin
+            (hash-set! res "ok" #t)
+            (hash-set! res "applied" applied)
+            (hash-set! res "reason" "applied")
+            res)
+          (begin
+            (daed:restore-circuit! ckt snap)
+            (hash-set! res "ok" #f)
+            (hash-set! res "applied" 0)
+            (hash-set! res "reason" reason)
+            res))))))
+
+(define (daed:viz-edit-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:viz-edit-applied r)
+  (hash-ref r "applied" 0))
+
+(define (daed:viz-edit-reason r)
+  (hash-ref r "reason" ""))

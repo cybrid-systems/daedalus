@@ -38,9 +38,10 @@ Primary objects under test:
 - Probe `02-rc-lowpass` — `.op` + fixed-step BE `.tran`, analytic RC checks, escapes=0
 - Probe `03-mutate-resistor` — safe `daed:mutate!` + dual `daed:snapshot`/`restore!`, escapes=0
 - Probe `05-agent-autotune` — O→D→M→V→R auto-tune to \(v_2=2.5\), escapes=0
+- Probe `06-viz-bidirectional` — netlist ↔ HTML (issue #1 P0–P2), escapes=0
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 
-**Post-P0:** topology mutate, multi-agent compose, nonlinear devices (as needed).
+**Post-P0:** topology mutate, multi-agent compose, nonlinear devices, richer viz layout (as needed).
 
 ## When generating or reviewing code
 

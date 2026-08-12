@@ -12,6 +12,7 @@
 | `probe.aura` | 1–2 | Node voltage / series query |
 | `mutate-circuit.aura` | 3 | Safe parameter mutate + circuit snapshot |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
+| `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
 
 ```scheme
 (require "daedalus-min" all:)
@@ -27,6 +28,11 @@
 (define tune
   (daed:autotune! ckt 2 2.5 0.05 "r2" 20 "scale" "r1" 5.0))
 (daed:tune-reached? tune)
+
+;; Visualization (issue #1)
+(define op (daed:simulate-op ckt))
+(write-file "out.html" (daed:circuit->html ckt op))
+(daed:apply-viz-edits! ckt (list (list "r2" 1e3)))
 ```
 
 Host resolution: `scripts/run-aura.sh` sets `AURA_PATH` to `../aura-grok/lib:./lib`.

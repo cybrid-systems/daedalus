@@ -19,6 +19,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 02 | [rc-lowpass](02-rc-lowpass/) | `.op` + `.tran` | **PASS** (Phase 2) |
 | 03 | [mutate-resistor](03-mutate-resistor/) | safe mutate + dual rollback | **PASS** (Phase 3) |
 | 05 | [agent-autotune](05-agent-autotune/) | O→D→M→V→R | **PASS** (Phase 4) |
+| 06 | [viz-bidirectional](06-viz-bidirectional/) | netlist ↔ HTML | **PASS** (issue #1) |
 
 ## Phase map
 
@@ -29,3 +30,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **2** | 02 | Fixed-step BE `.tran` (C, L, I) |
 | **3** | 03 | Parameter mutate + dual snapshot/rollback |
 | **4** | 05 | Agent closed-loop denseness |
+| **viz** | 06 | Bidirectional netlist ↔ HTML (issue #1) |

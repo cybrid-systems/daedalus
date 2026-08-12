@@ -32,6 +32,12 @@ No leave from \(V_A\). Agent O→D→M→V→R (`loop-once` / `autotune!`) uses 
 observe, propose, mutate, and circuit-only rollback. Aether is composed as a **pattern**,
 not as a required host rebind path.
 
+## Issue #1 (viz)
+
+No leave from \(V_A\). `circuit->html` / `apply-viz-edits!` are pure Aura string build +
+safe mutate. Browser edit-back uses exported JSON/form; live HTTP/postMessage transport
+is optional product glue, not denseness core.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

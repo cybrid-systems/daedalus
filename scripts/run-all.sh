@@ -10,6 +10,7 @@ PROBES=(
   02-rc-lowpass
   03-mutate-resistor
   05-agent-autotune
+  06-viz-bidirectional
 )
 
 pass=0
