@@ -8,7 +8,7 @@ on \(S_{\mathrm{Daedalus}}\).
 | 2026-08-11 | Float `/` returns `0` after intermediate arithmetic | [aura#2940](https://github.com/cybrid-systems/aura/issues/2940) **P0** | **fixed** | Was blocking dense GE; `daed:safe-div` workaround **removed** (2026-08-12). Solver uses native `/`. |
 | 2026-08-11 | No `1e-9` scientific literals | [aura#2941](https://github.com/cybrid-systems/aura/issues/2941) **P2** | **fixed** | `1e3`, `1e-12`, etc. now OK in netlist/probe code. |
 | 2026-08-11 | Export-before-require discipline | [aura#2766](https://github.com/cybrid-systems/aura/issues/2766) | fixed (prior) | Still follow export-before-require in span libs. |
-| 2026-08-12 | `make-vector` rejects float length (incl. `floor` result) | host runtime | open (API discipline) | `floor(n)` is not integer-typed; `make-vector` may abort with `std::vector larger than max_size()`. **Workaround:** pass integer `nsteps` literals to `daed:simulate-tran`. |
+| 2026-08-12 | `make-vector` rejects float length (incl. `floor` result); misleading `max_size()` error | [aura#2965](https://github.com/cybrid-systems/aura/issues/2965) **P1** | open | `floor(n)` is not `integer?`; `make-vector 5.0` / `(floor 10.0)` fail. **Workaround:** integer `nsteps` literals in `daed:simulate-tran`. |
 
 ## Daedalus workarounds still in force
 
