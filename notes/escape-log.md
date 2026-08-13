@@ -126,6 +126,12 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #33 (end-to-end hot-swap demo)
+
+Same leave as #28. Probe 30 is the reproducible demo: `rebind-safe` to C++ GE,
+metered `with-escape`, then dual rollback of circuit + stats so `escapes`
+returns to the pre-swap value. Default backend stays pure.
+
 ## Issue #32 (buffer / Opaque exchange)
 
 Same leave class as #28. `daed:buf-identity!` / `ffi-solve-dense!` copy through

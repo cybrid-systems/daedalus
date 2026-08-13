@@ -98,3 +98,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Aura FFI binding layer (`c-load` / `c-func`, issue #30, probe 27)
 - [x] Hephaestus-pattern rebind-safe + escape metering (issue #31, probe 28)
 - [x] Opaque buffer exchange + identity soak (issue #32, probe 29)
+- [x] End-to-end pure → C++ hot-swap → dual rollback demo (issue #33, probe 30)

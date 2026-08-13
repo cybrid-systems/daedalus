@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-14  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–29** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–29) is a metered opt-in escape.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–30** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–30) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -62,6 +62,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [27](../examples/27-ffi-bind/) | `c-load` / `c-func` bind (issue #30) | **PASS** | 0 | metered |
 | [28](../examples/28-heph-wrap/) | Hephaestus rebind-safe (issue #31) | **PASS** | 0 | metered |
 | [29](../examples/29-buf-exchange/) | Opaque copy-in/out (issue #32) | **PASS** | 0 | metered |
+| [30](../examples/30-native-hotswap-demo/) | pure → C++ → rollback (issue #33) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -203,6 +204,12 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Identity kernel `daed_copy_f64` (dispatch `op=4`). Solve path also pairs every alloc.
 - Lifetime: Aura owns vectors; C++ borrows `double*` for the call only. See [buf-exchange.md](buf-exchange.md).
 - Probe 29: known vector round-trip; 32-cycle soak `live=0`; `own-check` ok; backend stays pure.
+
+### Issue #33 narrative (end-to-end hot-swap demo)
+
+- Probe 30 stitches #28–#32: pure divider → dual snap → `rebind-safe` native → poison fallback → `restore!` + `kernel-restore!`.
+- After restore, `escapes=0`, `r2=2k`, backend `"pure"`, replay `.op` matches `10/3`.
+- Runner: `scripts/run-hotswap-demo.sh` (build `.so` then run).
 
 ## Judgment
 
