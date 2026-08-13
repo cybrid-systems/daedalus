@@ -19,7 +19,7 @@
 | `spice.aura` | M4 / #26 | FlatAST → SPICE deck for ngspice sign-off |
 | `ffi.aura` | M5 / #30–#32 | `c-load` / `c-func` binding + structured failures |
 | `buf.aura` | M5 / #32 | Tracked Opaque alloc / copy-in / copy-out / free |
-| `native.aura` | M5 / #28–#31 | Optional C++ dense-solve + Hephaestus rebind-safe (default off) |
+| `native.aura` | M5 / #28–#34 | Optional C++ dense-solve; `solve-prefer!` for `.op` / Newton |
 | `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |

@@ -158,12 +158,12 @@ Daedalus is better at teaching students how to **understand and reshape circuits
 **M0–M4** ([issue #27](https://github.com/cybrid-systems/daedalus/issues/27), [notes/roadmap.md](notes/roadmap.md))  
 P0 core, educational nonlinear, adaptive `.tran`, MOSFET, `.measure`, convergence aids, Monte Carlo, agent evolve, topology mutate, SPICE export. **Done.**
 
-**M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28)–[#33](https://github.com/cybrid-systems/daedalus/issues/33))  
-Optional metered C++ dense-solve hot-swap. End-to-end demo: probe 30.
-Default backend remains pure.
+**M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28)–[#34](https://github.com/cybrid-systems/daedalus/issues/34))  
+Optional metered C++ dense-solve for linear `.op` and Newton. Default stays pure.
 
 ```bash
 ./scripts/run-hotswap-demo.sh
+./scripts/run-aura.sh examples/31-native-op-nr/main.aura
 ```
 
 **Non-goals (P0 / P1)**  

@@ -42,6 +42,7 @@ PROBES=(
   28-heph-wrap
   29-buf-exchange
   30-native-hotswap-demo
+  31-native-op-nr
 )
 
 pass=0

@@ -7,7 +7,7 @@ Daedalus is a living laboratory: mutable FlatAST circuits, snapshot/rollback,
 agent loops. Production accuracy stays with ngspice / LTspice via export (#26).
 A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 
-**Suite:** 33/33 (30 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
+**Suite:** 34/34 (31 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
 
 | Milestone | Scope | Status |
 |-----------|--------|--------|
@@ -16,7 +16,7 @@ A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 | **M2** | Transient + devices | **done** (#18–#20) |
 | **M3** | Convergence & analysis | **done** (#21–#23) |
 | **M4** | Agent-driven evolution | **done** (#24–#26) |
-| **M5** | Native kernel escape | **slice landed** (parent #28, probe 26) |
+| **M5** | Native kernel escape | **done** (#28–#34, probes 26–31) |
 
 ## Milestone 0 – P0 Completion — done
 
@@ -50,14 +50,14 @@ Related: #2 (Phase 5), #3 diode, #4 BJT, #5 Newton-Raphson.
 - [x] [#25](https://github.com/cybrid-systems/daedalus/issues/25) Topology mutation surface — probe 24
 - [x] [#26](https://github.com/cybrid-systems/daedalus/issues/26) SPICE export for sign-off — probe 25
 
-## Milestone 5 – Native Kernel Escape — slice landed (issue #28)
+## Milestone 5 – Native Kernel Escape — done (issues #28–#34)
 
 Parent: **[#28](https://github.com/cybrid-systems/daedalus/issues/28)** — probe 26.
 
 The #28 success criteria are met (ABI, `c-load`, rebind-safe pattern, Opaque
 copy, divider demo, optional dispatch). #29–#31 record ABI, FFI, and the
 Hephaestus rebind-safe wrapper, Opaque exchange, and the end-to-end
-hot-swap demo. Sub-issue #34 remains unless closed separately.
+hot-swap demo, and optional native `.op` / Newton.
 
 - [x] [#28](https://github.com/cybrid-systems/daedalus/issues/28) Parent success criteria — probe 26
 - [x] [#29](https://github.com/cybrid-systems/daedalus/issues/29) ABI + build conventions
@@ -65,7 +65,7 @@ hot-swap demo. Sub-issue #34 remains unless closed separately.
 - [x] [#31](https://github.com/cybrid-systems/daedalus/issues/31) Hephaestus wrapper + escape metering — probe 28
 - [x] [#32](https://github.com/cybrid-systems/daedalus/issues/32) Buffer / Opaque exchange — probe 29
 - [x] [#33](https://github.com/cybrid-systems/daedalus/issues/33) Pure → C++ hot-swap → rollback demo — probe 30
-- [ ] [#34](https://github.com/cybrid-systems/daedalus/issues/34) Optional native `.op` / Newton backend
+- [x] [#34](https://github.com/cybrid-systems/daedalus/issues/34) Optional native `.op` / Newton backend — probe 31
 
 Semantic layer stays pure Aura. Native calls are metered and rollback-safe.
 

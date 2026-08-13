@@ -16,6 +16,7 @@
         daed:solve-rebind-ok?
         daed:solve-rebind-reason
         daed:solve-rebind-prev
+        daed:solve-prefer!
         daed:solve-kernel-name
         daed:with-escape
         daed:rebind-safe
@@ -40,7 +41,7 @@
 
 (require "ffi" all:)
 
-(define daed:native-version 3)
+(define daed:native-version 4)
 
 ; Logical kernel name (Hephaestus kscale analogue). Backends: "pure" | "native".
 (define daed:solve-kernel-name "solve-mna")
@@ -170,6 +171,20 @@
 
 (define (daed:solve-rebind-prev r)
   (hash-ref r "prev" "pure"))
+
+; Capability flag for real analyses (issue #34).
+; "pure"   — force Aura GE
+; "native" — require the C++ lib (ok=#f / no-lib if missing)
+; "auto"   — native if the lib binds, otherwise stay pure (silent)
+(define (daed:solve-prefer! kind)
+  (let ((want (if (string? kind) kind "pure")))
+    (if (equal? want "auto")
+      (if (daed:native-ready?)
+        (daed:rebind-safe "solve-mna" "native")
+        (let ((r (daed:rebind-safe "solve-mna" "pure")))
+          (hash-set! r "reason" "auto-pure")
+          r))
+      (daed:rebind-safe "solve-mna" want))))
 
 (define (daed:kernel-snapshot)
   (let ((s (hash)))

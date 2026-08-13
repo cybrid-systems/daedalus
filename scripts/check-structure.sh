@@ -112,6 +112,8 @@ required=(
   "examples/29-buf-exchange/README.md"
   "examples/30-native-hotswap-demo/main.aura"
   "examples/30-native-hotswap-demo/README.md"
+  "examples/31-native-op-nr/main.aura"
+  "examples/31-native-op-nr/README.md"
   "scripts/run-hotswap-demo.sh"
   "scripts/roundtrip-spice.sh"
   "examples/16-nl-op-suite/ref/ngspice.tsv"

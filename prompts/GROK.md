@@ -63,10 +63,11 @@ Primary objects under test:
 - Probe `28-heph-wrap` — `rebind-safe` / `with-escape` / `own-check` (issue #31)
 - Probe `29-buf-exchange` — Opaque copy-in/out + soak (issue #32)
 - Probe `30-native-hotswap-demo` — pure → C++ → dual rollback (issue #33)
+- Probe `31-native-op-nr` — optional native `.op` / Newton (issue #34)
 - Native ABI: `extern "C"` + workspace variant + CMake/g++ (`scripts/check-native-abi.sh`, issue #29)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
-- Roadmap: M0–M4 done (issue #27). M5 #28–#33 landed; #34 remains.
+- Roadmap: M0–M4 done (issue #27). M5 #28–#34 landed.
 
 **Post-M4:** M5 C++ hot-swap (metered); optional multi-agent compose, PNP / astable, richer viz.
 

@@ -1,0 +1,179 @@
+; examples/31-native-op-nr/main.aura
+;
+; Milestone 5 / issue #34 — optional native backend on real .op / Newton.
+;   A. Pure diode .op; vd ~ 0.7 V; E=0
+;   B. solve-prefer! "native"; same circuit; vd matches; E ≈ NR iters
+;   C. Linear divider one-shot native (1 extra escape)
+;   D. solve-prefer! "pure"; same diode; vd matches A; no new escapes
+;   E. SPICE export unchanged after native .op
+;
+; Circuit code is identical on both backends.
+; Build first: ./scripts/build-native.sh
+; Run: ./scripts/run-aura.sh examples/31-native-op-nr/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 31-native-op-nr: optional native .op / Newton ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " solve=")
+(display daed:solve-version)
+(display " native=")
+(display daed:native-version)
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+(define ver-ok (daed:check-true (and (>= daed:solve-version 8)
+                                     (>= daed:native-version 4)
+                                     (equal? (daed:solve-backend) "pure"))))
+
+(define Vin 5.0)
+(define Rval 1e3)
+(define dckt
+  (daed:circuit "diode-fwd"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:D "d1" 2 0))))
+(define lckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+; ── A. Pure diode ──
+(define p0 (daed:solve-prefer! "pure"))
+(define a-pref (daed:check-true (and (daed:solve-rebind-ok? p0)
+                                     (equal? (daed:solve-backend) "pure"))))
+(define op0 (daed:simulate-op dckt))
+(daed:stats-bump! "sim_runs")
+(define vd0 (daed:v op0 2))
+(define it0 (daed:op-iters op0))
+(define a-ok (daed:check-true (daed:op-ok? op0)))
+(define a-vd (daed:check-true (and (number? vd0) (> vd0 0.55) (< vd0 0.85))))
+(define a-it (daed:check-true (and (number? it0) (> it0 0) (< it0 50))))
+(define a-e (daed:check-eq (daed:escape-count) 0))
+
+(display "A pure diode vd=")
+(display vd0)
+(display " iters=")
+(display it0)
+(display " escapes=")
+(display (daed:escape-count))
+(newline)
+
+; ── B. Native Newton (same circuit) ──
+(define e1 (daed:escape-count))
+(define p1 (daed:solve-prefer! "native"))
+(define b-pref (daed:check-true (and (daed:solve-rebind-ok? p1)
+                                     (equal? (daed:solve-backend) "native"))))
+(define op1 (daed:simulate-op dckt))
+(daed:stats-bump! "sim_runs")
+(define vd1 (daed:v op1 2))
+(define it1 (daed:op-iters op1))
+(define e2 (daed:escape-count))
+(define de (- e2 e1))
+(define b-ok (daed:check-true (daed:op-ok? op1)))
+(define b-vd (daed:check-rel vd1 vd0 1e-6 1e-9))
+(define b-it (daed:check-true (and (number? it1) (> it1 0) (< it1 50))))
+(define b-esc (daed:check-true (and (>= de 1) (<= de it1))))
+(define b-own (daed:check-true (daed:own-ok? (daed:own-check))))
+
+(display "B native diode vd=")
+(display vd1)
+(display " iters=")
+(display it1)
+(display " d-escapes=")
+(display de)
+(newline)
+
+; ── C. Linear .op also uses the same native kernel ──
+(define e3 (daed:escape-count))
+(define opL (daed:simulate-op lckt))
+(daed:stats-bump! "sim_runs")
+(define v2L (daed:v opL 2))
+(define e4 (daed:escape-count))
+(define c-ok (daed:check-true (daed:op-ok? opL)))
+(define c-v (daed:check-rel v2L (/ 10.0 3.0) 1e-6 1e-9))
+(define c-esc (daed:check-eq (- e4 e3) 1))
+
+(display "C native divider v2=")
+(display v2L)
+(display " d-escapes=")
+(display (- e4 e3))
+(newline)
+
+; ── D. Back to pure; same diode, no new escapes ──
+(define p2 (daed:solve-prefer! "pure"))
+(define d-pref (daed:check-true (and (daed:solve-rebind-ok? p2)
+                                     (equal? (daed:solve-backend) "pure"))))
+(define e5 (daed:escape-count))
+(define op2 (daed:simulate-op dckt))
+(daed:stats-bump! "sim_runs")
+(define vd2 (daed:v op2 2))
+(define d-ok (daed:check-true (daed:op-ok? op2)))
+(define d-vd (daed:check-rel vd2 vd0 1e-6 1e-9))
+(define d-e (daed:check-eq (daed:escape-count) e5))
+
+(display "D pure again vd=")
+(display vd2)
+(display " escapes=")
+(display (daed:escape-count))
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+; ── E. SPICE export unchanged ──
+(define deck (daed:circuit->spice dckt))
+(define e-sp (daed:check-true (and (string? deck)
+                                   (daed:string-has? deck "d1")
+                                   (daed:string-has? deck ".end"))))
+
+(display "E spice len=")
+(display (string-length deck))
+(newline)
+
+(define all-ok
+  (and ver-ok
+       a-pref a-ok a-vd a-it a-e
+       b-pref b-ok b-vd b-it b-esc b-own
+       c-ok c-v c-esc
+       d-pref d-ok d-vd d-e
+       e-sp
+       (= (daed:stats-ref "correctness_fail") 0)
+       (equal? (daed:solve-backend) "pure")))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: native .op / Newton optional backend (escapes=")
+    (display (daed:escape-count))
+    (display ")")
+    (newline)
+    (display "RESULT pass example=31-native-op-nr escapes=")
+    (display (daed:escape-count))
+    (newline))
+  (begin
+    (display "FAIL: native-op-nr denseness probe")
+    (newline)
+    (display "RESULT fail example=31-native-op-nr")
+    (newline)
+    (display "  a-e=")
+    (display a-e)
+    (display " b-pref=")
+    (display b-pref)
+    (display " b-vd=")
+    (display b-vd)
+    (display " b-esc=")
+    (display b-esc)
+    (display " d-e=")
+    (display d-e)
+    (display " e-sp=")
+    (display e-sp)
+    (newline)))

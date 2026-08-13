@@ -100,9 +100,9 @@ symbols with the C names (no `_Z…` mangling). On macOS, `nm` may prefix
 (daed:load-kernels "native/libdaed_solve.so")  ; hash: ok / lib / reason
 (daed:bind-solve-dense lib-id)                 ; hash + callable (A b n)
 (daed:native-ready?)          ; #t if .so loaded and ABI=1
-(daed:rebind-safe "solve-mna" "native") ; Hephaestus-pattern snap + switch
-(daed:simulate-op ckt)        ; uses native GE (with-escape "daed-solve-dense")
-(daed:rebind-safe "solve-mna" "pure")   ; back to V_A
+(daed:solve-prefer! "native") ; or "pure" / "auto" (issue #34)
+(daed:simulate-op ckt)        ; linear .op and Newton share dense-solve!
+(daed:solve-prefer! "pure")   ; back to V_A
 ```
 
 Default backend is `"pure"` (existing probes stay E=0).

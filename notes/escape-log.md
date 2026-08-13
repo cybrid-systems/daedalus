@@ -126,6 +126,12 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #34 (optional native `.op` / Newton)
+
+Same leave as #28. `simulate-op` (linear and NR) calls `dense-solve!`, so
+`(daed:solve-prefer! "native")` makes every Jacobian solve a metered escape.
+Default backend stays pure; SPICE export is unchanged.
+
 ## Issue #33 (end-to-end hot-swap demo)
 
 Same leave as #28. Probe 30 is the reproducible demo: `rebind-safe` to C++ GE,

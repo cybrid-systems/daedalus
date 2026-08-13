@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-14  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–30** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–30) is a metered opt-in escape.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–31** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–31) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -63,6 +63,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [28](../examples/28-heph-wrap/) | Hephaestus rebind-safe (issue #31) | **PASS** | 0 | metered |
 | [29](../examples/29-buf-exchange/) | Opaque copy-in/out (issue #32) | **PASS** | 0 | metered |
 | [30](../examples/30-native-hotswap-demo/) | pure → C++ → rollback (issue #33) | **PASS** | 0 | metered |
+| [31](../examples/31-native-op-nr/) | native `.op` / Newton (issue #34) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -210,6 +211,12 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Probe 30 stitches #28–#32: pure divider → dual snap → `rebind-safe` native → poison fallback → `restore!` + `kernel-restore!`.
 - After restore, `escapes=0`, `r2=2k`, backend `"pure"`, replay `.op` matches `10/3`.
 - Runner: `scripts/run-hotswap-demo.sh` (build `.so` then run).
+
+### Issue #34 narrative (optional native `.op` / Newton)
+
+- `daed:solve-prefer!` `"pure"` / `"native"` / `"auto"` is the capability flag.
+- Linear `.op` and every Newton step share `daed:dense-solve!`; native fail flips back to pure.
+- Probe 31: diode `vd` matches across backends; native E ≈ NR iters; SPICE export unchanged.
 
 ## Judgment
 
