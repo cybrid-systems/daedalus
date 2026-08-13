@@ -40,6 +40,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 24 | [topo-mutate](24-topo-mutate/) | topology add/remove/search | **PASS** (issue #25 / M4) |
 | 25 | [spice-export](25-spice-export/) | FlatAST → SPICE export | **PASS** (issue #26 / M4) |
 | 26 | [native-hotswap](26-native-hotswap/) | C++ GE hot-swap + fallback | **PASS** (issue #28 / M5) |
+| 27 | [ffi-bind](27-ffi-bind/) | `c-load` / `c-func` binding layer | **PASS** (issue #30 / M5) |
 
 ABI/build conventions (issue #29): `./scripts/check-native-abi.sh` — `nm`/`dlsym` + workspace variant, no Aura required.
 

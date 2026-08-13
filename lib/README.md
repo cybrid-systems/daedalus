@@ -17,7 +17,8 @@
 | `evolve.aura` | M4 / #24 | Spec-driven agent search + good-state log |
 | `topo.aura` | M4 / #25 | Series/parallel/tap topology mutate + family search |
 | `spice.aura` | M4 / #26 | FlatAST → SPICE deck for ngspice sign-off |
-| `native.aura` | M5 / #28–#29 | Optional C++ dense-solve via `c-load` (default off) |
+| `ffi.aura` | M5 / #30 | `c-load` / `c-func` binding + structured failures |
+| `native.aura` | M5 / #28–#30 | Optional C++ dense-solve via `c-load` (default off) |
 | `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |

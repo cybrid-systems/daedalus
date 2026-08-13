@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-14  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–26** PASS; `check-native-abi` PASS (issue #29). Core \(E=0\) on the default pure backend. Native GE (probe 26) is a metered opt-in escape.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–27** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–27) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -59,6 +59,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [24](../examples/24-topo-mutate/) | topology mutate + family search (issue #25) | **PASS** | 0 | 0 |
 | [25](../examples/25-spice-export/) | FlatAST → SPICE export (issue #26) | **PASS** | 0 | 0 |
 | [26](../examples/26-native-hotswap/) | C++ GE hot-swap (issue #28) | **PASS** | 0 | metered |
+| [27](../examples/27-ffi-bind/) | `c-load` / `c-func` bind (issue #30) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -179,6 +180,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Optional workspace: `daed_solve_dense_ws` / `daed_solve_dense_work_n` (A preserved).
 - Build: `scripts/build-native.sh` (g++ `.so`/`.dylib`) and `native/CMakeLists.txt`.
 - `scripts/check-native-abi.sh`: `nm` unmangled `T` symbols + `dlsym` 2×2 example.
+
+### Issue #30 narrative (Aura FFI binding)
+
+- `lib/ffi.aura`: `load-kernels` / `bind-solve-dense` / `bind-c-func` return hashes (`ok`, `reason`, `error`, `lib`, `fn`).
+- One live `c-func` (`daed_dispatch`) — host `cid < n_ffi` steals Aura closures.
+- `lib-id=-1` is accepted; after `c-load` (RTLD_LOCAL) it reuses the last handle rather than `RTLD_DEFAULT`.
+- Probe 27: missing lib + bad handle fail structured; 2×2 `(2,1)`; `daed:V` still works.
 
 ## Judgment
 

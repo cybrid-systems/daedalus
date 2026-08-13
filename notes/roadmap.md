@@ -7,7 +7,7 @@ Daedalus is a living laboratory: mutable FlatAST circuits, snapshot/rollback,
 agent loops. Production accuracy stays with ngspice / LTspice via export (#26).
 A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 
-**Suite:** 29/29 (26 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
+**Suite:** 30/30 (27 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
 
 | Milestone | Scope | Status |
 |-----------|--------|--------|
@@ -61,7 +61,7 @@ remain for follow-up polish unless closed separately.
 
 - [x] [#28](https://github.com/cybrid-systems/daedalus/issues/28) Parent success criteria — probe 26
 - [x] [#29](https://github.com/cybrid-systems/daedalus/issues/29) ABI + build conventions
-- [ ] [#30](https://github.com/cybrid-systems/daedalus/issues/30) Aura FFI (`c-load` / `c-func`)
+- [x] [#30](https://github.com/cybrid-systems/daedalus/issues/30) Aura FFI (`c-load` / `c-func`) — probe 27
 - [ ] [#31](https://github.com/cybrid-systems/daedalus/issues/31) Hephaestus wrapper + escape metering
 - [ ] [#32](https://github.com/cybrid-systems/daedalus/issues/32) Buffer / Opaque exchange
 - [ ] [#33](https://github.com/cybrid-systems/daedalus/issues/33) Pure → C++ hot-swap → rollback demo

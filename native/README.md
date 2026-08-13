@@ -96,6 +96,8 @@ symbols with the C names (no `_Z…` mangling). On macOS, `nm` may prefix
 ## Aura
 
 ```scheme
+(daed:load-kernels "native/libdaed_solve.so")  ; hash: ok / lib / reason
+(daed:bind-solve-dense lib-id)                 ; hash + callable (A b n)
 (daed:native-ready?)          ; #t if .so loaded and ABI=1
 (daed:solve-rebind! "native") ; Hephaestus-style snap + switch
 (daed:simulate-op ckt)        ; uses native GE

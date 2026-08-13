@@ -1,0 +1,342 @@
+; lib/ffi.aura — Aura FFI binding layer (issue #30 / M5)
+;
+; (require "ffi" all:)
+;
+; Load a Daedalus .so/.dylib and bind solver symbols via c-load / c-func.
+; Failure returns a hash (ok / reason / error) — never throws into an
+; agent loop. Host c-func steals cid < n_ffi, so only one live c-func
+; is allowed: daed_dispatch. bind-solve-dense wraps that trampoline.
+; c-load uses RTLD_LOCAL, so lib-id=-1 (RTLD_DEFAULT) does not see a
+; just-loaded kernel; we fall back to the last successful c-load handle.
+
+(export daed:ffi-version
+        daed:load-kernels
+        daed:bind-c-func
+        daed:bind-solve-dense
+        daed:ffi-ok?
+        daed:ffi-reason
+        daed:ffi-error
+        daed:ffi-lib
+        daed:ffi-fn
+        daed:ffi-dispatch
+        daed:ffi-path
+        daed:ffi-solve-dense!
+        daed:ffi-on-call!)
+
+(define daed:ffi-version 1)
+
+(define *daed-ffi-max-lib* -1)
+(define *daed-ffi-last-lib* -2)
+(define *daed-ffi-dispatch* #f)
+(define *daed-ffi-solve-fn* #f)
+(define *daed-ffi-on-call* #f)
+
+(define (daed:ffi-on-call! fn)
+  (set! *daed-ffi-on-call* fn)
+  #t)
+
+(define (daed:ffi-dispatch)
+  *daed-ffi-dispatch*)
+
+(define (daed:ffi-ok? r)
+  (if (not r)
+    #f
+    (hash-ref r "ok" #f)))
+
+(define (daed:ffi-reason r)
+  (if (not r)
+    "no-result"
+    (hash-ref r "reason" "")))
+
+(define (daed:ffi-error r)
+  (if (not r)
+    ""
+    (hash-ref r "error" "")))
+
+(define (daed:ffi-lib r)
+  (if (not r)
+    -2
+    (hash-ref r "lib" -2)))
+
+(define (daed:ffi-path r)
+  (if (not r)
+    ""
+    (hash-ref r "path" "")))
+
+(define (daed:ffi-fn r)
+  (let ((f #f))
+    (if r
+      (set! f (hash-ref r "fn" #f))
+      #f)
+    (if f
+      f
+      *daed-ffi-solve-fn*)))
+
+(define (daed:ffi-blank reason)
+  (let ((res (hash)))
+    (hash-set! res "ok" #f)
+    (hash-set! res "lib" -2)
+    (hash-set! res "fn" #f)
+    (hash-set! res "dispatch" #f)
+    (hash-set! res "reason" reason)
+    (hash-set! res "error" "")
+    (hash-set! res "path" "")
+    (hash-set! res "rc" -1)
+    res))
+
+(define (daed:ffi-fail reason err lib path)
+  (let ((res (daed:ffi-blank reason)))
+    (hash-set! res "error" err)
+    (hash-set! res "lib" lib)
+    (hash-set! res "path" path)
+    res))
+
+(define (daed:ffi-proc? x)
+  (if (not x)
+    #f
+    (if (number? x)
+      #f
+      #t)))
+
+(define (daed:f64-off i)
+  (inexact->exact (* i 8)))
+
+(define (daed:pack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (c-struct-set! buf (daed:f64-off i) (vector-ref vec i))
+        (set! i (+ i 1))))
+    buf))
+
+(define (daed:unpack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (vector-set! vec i (c-struct-ref buf (daed:f64-off i) 1))
+        (set! i (+ i 1))))
+    vec))
+
+; Copy-in / dispatch op 2 / copy-out. Does not meter escapes.
+(define (daed:ffi-solve-dense! A b n)
+  (let ((res (daed:ffi-blank "init"))
+        (nn 0)
+        (Ab #f)
+        (bb #f)
+        (rc -1)
+        (disp *daed-ffi-dispatch*))
+    (if (not (daed:ffi-proc? disp))
+      (daed:ffi-fail "no-bind" "daed_dispatch is not bound" -2 "")
+      (if (or (not (number? n)) (<= n 0))
+        (daed:ffi-fail "bad-arg" "n must be a positive integer" -2 "")
+        (begin
+          (set! nn (inexact->exact n))
+          (set! Ab (c-alloc (inexact->exact (* nn nn 8))))
+          (set! bb (c-alloc (inexact->exact (* nn 8))))
+          (if (or (not Ab) (not bb) (number? Ab) (number? bb))
+            (daed:ffi-fail "alloc" "c-alloc failed" -2 "")
+            (begin
+              (daed:pack-f64! Ab A (* nn nn))
+              (daed:pack-f64! bb b nn)
+              (set! rc
+                (try (disp 2
+                           (c-opaque->int Ab)
+                           (c-opaque->int bb)
+                           nn)
+                     (catch (e) -1)))
+              (hash-set! res "rc" rc)
+              (if (= rc 0)
+                (begin
+                  (daed:unpack-f64! bb b nn)
+                  (c-free Ab)
+                  (c-free bb)
+                  (hash-set! res "ok" #t)
+                  (hash-set! res "reason" "ok")
+                  res)
+                (begin
+                  (c-free Ab)
+                  (c-free bb)
+                  (hash-set! res "reason" "solve-fail")
+                  (hash-set! res "error" "daed_dispatch op=2 returned non-zero")
+                  res)))))))))
+
+(define (daed:ffi-make-solve-fn)
+  (lambda (A b n)
+    (begin
+      (if *daed-ffi-on-call*
+        (*daed-ffi-on-call* "native-dense-solve")
+        #t)
+      (daed:ffi-solve-dense! A b n))))
+
+(define (daed:ffi-try-dispatch lib-id)
+  (try (c-func lib-id "daed_dispatch" "(Int Int Int Int) -> Int")
+       (catch (e) 0)))
+
+(define (daed:ffi-install-dispatch! disp lib-id)
+  (let ((v -1)
+        (res (daed:ffi-blank "init")))
+    (set! v (try (disp 0 0 0 0) (catch (e) -1)))
+    (if (not (= v 1))
+      (daed:ffi-fail "bad-abi" "daed_abi_version is not 1" lib-id "")
+      (begin
+        (set! *daed-ffi-dispatch* disp)
+        (set! *daed-ffi-solve-fn* (daed:ffi-make-solve-fn))
+        (if (>= lib-id 0)
+          (begin
+            (if (> lib-id *daed-ffi-max-lib*)
+              (set! *daed-ffi-max-lib* lib-id)
+              #t)
+            (set! *daed-ffi-last-lib* lib-id))
+          #t)
+        (hash-set! res "ok" #t)
+        (hash-set! res "lib" lib-id)
+        (hash-set! res "fn" *daed-ffi-solve-fn*)
+        (hash-set! res "dispatch" disp)
+        (hash-set! res "reason" "bound")
+        res))))
+
+(define (daed:ffi-reuse lib-id)
+  (let ((res (daed:ffi-blank "reused")))
+    (hash-set! res "ok" #t)
+    (hash-set! res "lib" lib-id)
+    (hash-set! res "fn" *daed-ffi-solve-fn*)
+    (hash-set! res "dispatch" *daed-ffi-dispatch*)
+    (hash-set! res "reason" "reused")
+    res))
+
+; Classify a failed c-func: empty loader vs bad handle vs missing symbol.
+; First-ever c-load failure also returns handle 0 (host residual).
+(define (daed:ffi-cfunc-fail lib-id name)
+  (if (and (number? lib-id) (>= lib-id 0) (< *daed-ffi-max-lib* lib-id))
+    (if (and (< *daed-ffi-max-lib* 0) (= lib-id 0))
+      (daed:ffi-fail "no-lib"
+                     "c-load failed (handle 0 and no library is loaded)"
+                     lib-id
+                     name)
+      (daed:ffi-fail "bad-lib"
+                     "c-func rejected library handle"
+                     lib-id
+                     name))
+    (daed:ffi-fail "no-symbol"
+                   "c-func did not return a procedure"
+                   lib-id
+                   name)))
+
+(define (daed:bind-c-func lib-id name sig)
+  (let ((disp #f)
+        (nm (if (string? name) name "")))
+    (if (and (daed:ffi-proc? *daed-ffi-dispatch*)
+             (equal? nm "daed_dispatch"))
+      (daed:ffi-reuse lib-id)
+      (if (and (daed:ffi-proc? *daed-ffi-dispatch*)
+               (not (equal? nm "daed_dispatch")))
+        (begin
+          (set! disp (try (c-func lib-id nm sig) (catch (e) 0)))
+          (if (daed:ffi-proc? disp)
+            (daed:ffi-fail "cid-limit"
+                           "host c-func steals cid < n_ffi; only daed_dispatch is bound"
+                           lib-id
+                           nm)
+            (daed:ffi-fail "no-symbol"
+                           "symbol not found"
+                           lib-id
+                           nm)))
+        (begin
+          (set! disp (try (c-func lib-id nm sig) (catch (e) 0)))
+          (if (not (daed:ffi-proc? disp))
+            (daed:ffi-cfunc-fail lib-id nm)
+            (if (equal? nm "daed_dispatch")
+              (daed:ffi-install-dispatch! disp lib-id)
+              (let ((res (daed:ffi-blank "bound")))
+                (hash-set! res "ok" #t)
+                (hash-set! res "lib" lib-id)
+                (hash-set! res "fn" disp)
+                (hash-set! res "reason" "bound")
+                res))))))))
+
+(define (daed:bind-solve-dense lib-id)
+  (let ((id lib-id)
+        (disp #f)
+        (fallback -2))
+    (if (not (number? id))
+      (daed:ffi-fail "bad-lib" "lib-id must be an integer" -2 "")
+      (if (daed:ffi-proc? *daed-ffi-dispatch*)
+        (daed:ffi-reuse id)
+        (if (= id -1)
+          (begin
+            (set! disp (daed:ffi-try-dispatch -1))
+            (if (daed:ffi-proc? disp)
+              (daed:ffi-install-dispatch! disp -1)
+              (begin
+                (set! fallback *daed-ffi-last-lib*)
+                (if (>= fallback 0)
+                  (daed:bind-solve-dense fallback)
+                  (daed:ffi-fail "no-symbol"
+                                 "RTLD_DEFAULT has no daed_dispatch (c-load is RTLD_LOCAL)"
+                                 -1
+                                 "")))))
+          (begin
+            (set! disp (daed:ffi-try-dispatch id))
+            (if (daed:ffi-proc? disp)
+              (daed:ffi-install-dispatch! disp id)
+              (daed:ffi-cfunc-fail id "daed_dispatch"))))))))
+
+(define (daed:load-kernels-path path)
+  (let ((res (daed:ffi-blank "init"))
+        (hid -2)
+        (bd #f))
+    (hash-set! res "path" path)
+    (set! hid (try (c-load path) (catch (e) -2)))
+    (if (not (number? hid))
+      (daed:ffi-fail "load-error" "c-load threw" -2 path)
+      (if (< hid 0)
+        (daed:ffi-fail "load-error" "c-load returned negative" hid path)
+        (if (and (>= *daed-ffi-max-lib* 0) (<= hid *daed-ffi-max-lib*))
+          (daed:ffi-fail "no-lib"
+                         "c-load failed (handle not new; missing file or dlopen error)"
+                         hid
+                         path)
+          (if (daed:ffi-proc? *daed-ffi-dispatch*)
+            (begin
+              (set! *daed-ffi-max-lib* hid)
+              (set! *daed-ffi-last-lib* hid)
+              (hash-set! res "ok" #t)
+              (hash-set! res "lib" hid)
+              (hash-set! res "reason" "loaded")
+              (hash-set! res "fn" *daed-ffi-solve-fn*)
+              (hash-set! res "dispatch" *daed-ffi-dispatch*)
+              res)
+            (begin
+              (set! bd (daed:bind-solve-dense hid))
+              (if (daed:ffi-ok? bd)
+                (begin
+                  (hash-set! bd "path" path)
+                  (hash-set! bd "reason" "loaded")
+                  bd)
+                (begin
+                  (hash-set! bd "path" path)
+                  bd)))))))))
+
+(define (daed:load-kernels-default)
+  (let ((a (daed:load-kernels-path "native/libdaed_solve.so")))
+    (if (daed:ffi-ok? a)
+      a
+      (daed:load-kernels-path "native/libdaed_solve.dylib"))))
+
+(define (daed:load-kernels path)
+  (if (and (number? path) (= path -1))
+    (let ((res (daed:ffi-blank "rtld-default")))
+      (hash-set! res "ok" #t)
+      (hash-set! res "lib" -1)
+      (hash-set! res "reason" "rtld-default")
+      res)
+    (if (not path)
+      (daed:load-kernels-default)
+      (if (string? path)
+        (if (equal? path "")
+          (daed:load-kernels-default)
+          (daed:load-kernels-path path))
+        (daed:ffi-fail "bad-path"
+                       "load-kernels expects a path string, #f, or -1"
+                       -2
+                       "")))))

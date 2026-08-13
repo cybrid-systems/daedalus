@@ -126,6 +126,10 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #30 (Aura FFI binding)
+
+Same leave as #28. `lib/ffi.aura` is the reusable `c-load` / `c-func` wrapper; the bound 2×2 callable still goes through `daed:native-escape!`. Default backend stays pure.
+
 ## Issue #28 (native dense solve)
 
 | Date | Location | Reason | Mechanism | Impact | Mitigation / Plan |

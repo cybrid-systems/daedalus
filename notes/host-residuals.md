@@ -11,6 +11,8 @@ on \(S_{\mathrm{Daedalus}}\).
 | 2026-08-12 | `make-vector` rejects float length (incl. `floor` result); misleading `max_size()` error | [aura#2965](https://github.com/cybrid-systems/aura/issues/2965) **P1** | **fixed** | Host coerces integer-valued float lengths for `make-vector`. `vector-ref` / `vector-set!` still need true integers. Daedalus: `daed:as-int` / `daed:nsteps-for` = `inexact->exact` ∘ `round`. |
 | 2026-08-12 | `ast:snapshot` returns silent `-1` without `set-code` workspace (stdin denseness) | [aura#2966](https://github.com/cybrid-systems/aura/issues/2966) **P1** | open | Related #2918 (wrong `current-source`). Dual rollback: pure-Aura `daed:snapshot` (comps + stats); host `ast_id` best-effort. Aether works via `set-code` bootstrap. |
 | 2026-08-14 | `c-func` closures collide with low Aura cids (`cid < n_ffi` treated as FFI) | host FFI apply | open | Binding 3 symbols stole `daed:V`/`daed:circuit` and SIGSEGV'd. Workaround: one `daed_dispatch` trampoline + `c-opaque->int`. |
+| 2026-08-14 | `c-load` returns `0` on both first success and `dlopen` failure | host FFI | open | Failed load does not push a lib, so handle `0` is reused. `load-kernels` treats a non-increasing handle as `no-lib`. |
+| 2026-08-14 | `c-load` is `RTLD_NOW\|RTLD_LOCAL` so `c-func -1` cannot see just-loaded `daed_*` | host FFI | open | `bind-solve-dense(-1)` tries `RTLD_DEFAULT`, then the last successful `c-load` handle. |
 
 ## Daedalus workarounds still in force
 

@@ -38,6 +38,7 @@ PROBES=(
   24-topo-mutate
   25-spice-export
   26-native-hotswap
+  27-ffi-bind
 )
 
 pass=0

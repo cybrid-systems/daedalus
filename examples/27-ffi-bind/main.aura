@@ -1,0 +1,198 @@
+; examples/27-ffi-bind/main.aura
+;
+; Milestone 5 / issue #30 — Aura FFI binding layer.
+;   A. Missing library → structured fail (no crash)
+;   B. load-kernels of the example .so succeeds
+;   C. bind-solve-dense → callable; 2x+y=5, x+2y=4 → (2,1)
+;   D. Missing symbol / bad handle / RTLD_DEFAULT(-1) stay structured
+;   E. After one c-func, daed:V / daed:circuit still work (cid-safe)
+;
+; Axes: c-load + c-func + structured errors
+; Does not switch the default solve backend (other probes stay E=0)
+;
+; Build first: ./scripts/build-native.sh
+; Run: ./scripts/run-aura.sh examples/27-ffi-bind/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 27-ffi-bind: c-load / c-func binding ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " native=")
+(display daed:native-version)
+(display " ffi=")
+(display daed:ffi-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:ffi-version)
+                                     (>= daed:ffi-version 1)
+                                     (>= daed:native-version 2))))
+
+; ── A. Missing library (before any successful c-load) ──
+(define miss (daed:load-kernels "no-such-daed-kernel.so"))
+(define a-fail (daed:check-true (not (daed:ffi-ok? miss))))
+(define a-why (daed:check-true (or (equal? (daed:ffi-reason miss) "no-lib")
+                                   (equal? (daed:ffi-reason miss) "no-symbol")
+                                   (equal? (daed:ffi-reason miss) "load-error"))))
+
+(display "A missing ok=")
+(display (daed:ffi-ok? miss))
+(display " reason=")
+(display (daed:ffi-reason miss))
+(newline)
+
+; Bad handle before any successful c-load (after bind, 999 would reuse).
+(define badh (daed:bind-solve-dense 999))
+(define d-bad (daed:check-true (and (not (daed:ffi-ok? badh))
+                                    (or (equal? (daed:ffi-reason badh) "bad-lib")
+                                        (equal? (daed:ffi-reason badh) "no-symbol")))))
+
+(display "A bad-handle ok=")
+(display (daed:ffi-ok? badh))
+(display " reason=")
+(display (daed:ffi-reason badh))
+(newline)
+
+; ── B. Load the example kernel ──
+(define ld (daed:load-kernels "native/libdaed_solve.so"))
+(define b-ok (daed:check-true (daed:ffi-ok? ld)))
+(define b-lib (daed:check-true (and (number? (daed:ffi-lib ld))
+                                    (>= (daed:ffi-lib ld) 0))))
+
+(display "B load ok=")
+(display (daed:ffi-ok? ld))
+(display " lib=")
+(display (daed:ffi-lib ld))
+(display " reason=")
+(display (daed:ffi-reason ld))
+(newline)
+
+; ── C. Bind + known 2×2 ──
+(define bd (daed:bind-solve-dense (daed:ffi-lib ld)))
+(define c-bd (daed:check-true (daed:ffi-ok? bd)))
+(define fn (daed:ffi-fn bd))
+(define c-fn (daed:check-true (and fn (not (number? fn)))))
+
+(define A (make-vector 4 0.0))
+(vector-set! A 0 2.0)
+(vector-set! A 1 1.0)
+(vector-set! A 2 1.0)
+(vector-set! A 3 2.0)
+(define b (make-vector 2 0.0))
+(vector-set! b 0 5.0)
+(vector-set! b 1 4.0)
+
+(define sol (if fn (fn A b 2) #f))
+(define c-sol (daed:check-true (daed:ffi-ok? sol)))
+(define c-x (daed:check-rel (vector-ref b 0) 2.0 1e-9 1e-12))
+(define c-y (daed:check-rel (vector-ref b 1) 1.0 1e-9 1e-12))
+
+(display "C bind ok=")
+(display (daed:ffi-ok? bd))
+(display " solve ok=")
+(display (daed:ffi-ok? sol))
+(display " x=")
+(display (vector-ref b 0))
+(display " y=")
+(display (vector-ref b 1))
+(newline)
+
+; ── D. Failure modes stay structured ──
+(define nosym (daed:bind-c-func (daed:ffi-lib ld)
+                                "daed_no_such_symbol"
+                                "(Int) -> Int"))
+(define d-sym (daed:check-true (and (not (daed:ffi-ok? nosym))
+                                    (equal? (daed:ffi-reason nosym) "no-symbol"))))
+
+; -1 is supported. After a live bind we reuse (already-loaded).
+; A bare RTLD_DEFAULT lookup cannot see RTLD_LOCAL c-load symbols.
+(define dflt-ld (daed:load-kernels -1))
+(define d-dflt-ld (daed:check-true (and (daed:ffi-ok? dflt-ld)
+                                        (= (daed:ffi-lib dflt-ld) -1))))
+(define dflt-bd (daed:bind-solve-dense -1))
+(define d-dflt (daed:check-true (and (daed:ffi-ok? dflt-bd)
+                                     (or (equal? (daed:ffi-reason dflt-bd) "reused")
+                                         (equal? (daed:ffi-reason dflt-bd) "bound")))))
+
+(define zarg (daed:ffi-solve-dense! A b 0))
+(define d-arg (daed:check-true (and (not (daed:ffi-ok? zarg))
+                                    (equal? (daed:ffi-reason zarg) "bad-arg"))))
+
+(display "D nosym=")
+(display (daed:ffi-reason nosym))
+(display " badh=")
+(display (daed:ffi-reason badh))
+(display " dflt=")
+(display (daed:ffi-reason dflt-bd))
+(display " n0=")
+(display (daed:ffi-reason zarg))
+(newline)
+
+; ── E. One c-func must not steal daed:V / daed:circuit ──
+(define ckt
+  (daed:circuit "ffi"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+(define e-ckt (daed:check-true (and (string? (daed:ckt-name ckt))
+                                    (equal? (daed:ckt-name ckt) "ffi")
+                                    (= (daed:max-node (daed:ckt-comps ckt)) 2))))
+
+(display "E circuit=")
+(display (daed:ckt-name ckt))
+(display " nodes=")
+(display (daed:max-node (daed:ckt-comps ckt)))
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+(define backend-ok (daed:check-true (equal? (daed:solve-backend) "pure")))
+(define esc (daed:escape-count))
+(define esc-ok (daed:check-true (>= esc 1)))
+
+(define all-ok
+  (and ver-ok
+       a-fail a-why
+       b-ok b-lib
+       c-bd c-fn c-sol c-x c-y
+       d-sym d-bad d-dflt-ld d-dflt d-arg
+       e-ckt backend-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (equal? (daed:solve-backend) "pure")))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: FFI bind + 2x2 solve + structured errors (escapes=")
+    (display esc)
+    (display ")")
+    (newline)
+    (display "RESULT pass example=27-ffi-bind escapes=")
+    (display esc)
+    (newline))
+  (begin
+    (display "FAIL: ffi-bind denseness probe")
+    (newline)
+    (display "RESULT fail example=27-ffi-bind")
+    (newline)
+    (display "  a-fail=")
+    (display a-fail)
+    (display " b-ok=")
+    (display b-ok)
+    (display " c-sol=")
+    (display c-sol)
+    (display " c-x=")
+    (display c-x)
+    (display " d-sym=")
+    (display d-sym)
+    (display " d-dflt=")
+    (display d-dflt)
+    (display " e-ckt=")
+    (display e-ckt)
+    (newline)))

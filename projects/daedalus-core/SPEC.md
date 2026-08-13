@@ -95,3 +95,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Roadmap M0–M4 recorded (issue #27); M5 native kernel remains open (#28)
 - [x] Native C++ dense-solve hot-swap + fallback (issue #28, probe 26)
 - [x] ABI + build conventions for C++ kernels (issue #29)
+- [x] Aura FFI binding layer (`c-load` / `c-func`, issue #30, probe 27)
