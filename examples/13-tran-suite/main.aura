@@ -1,0 +1,168 @@
+; examples/13-tran-suite/main.aura
+;
+; Milestone 0 / issue #14 — fixed-step BE .tran suite.
+;   A. RC low-pass step vs analytic
+;   B. RL series step vs analytic (v_L and i_L)
+;   C. Series RLC: completes; v_C → Vin
+;   D. Mutate C and re-run .tran — slower rise
+;
+; Axes: BE companions + waveform store + mutate + probe
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/13-tran-suite/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 13-tran-suite: RC / RL / RLC fixed-step .tran ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " tran=")
+(display daed:tran-version)
+(newline)
+
+(define Vin 5.0)
+(define Rval 1e3)
+(define Cval 1e-6)
+(define Lval 1.0)
+(define tau-rc (* Rval Cval))
+(define tau-rl (/ Lval Rval))
+
+; ── A. RC ──
+(define ckt-rc
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval))))
+
+(define dt-rc (/ tau-rc 100.0))
+(define tr-rc (daed:simulate-tran ckt-rc dt-rc (daed:nsteps-for (* 5.0 tau-rc) dt-rc)))
+(daed:stats-bump! "sim_runs")
+(define a-ok (daed:check-true (daed:tran-ok? tr-rc)))
+(define a-ic (daed:check-approx (daed:tran-v-at tr-rc 2 0) 0.0 1e-9))
+(define k-tau (daed:nsteps-for tau-rc dt-rc))
+(define a-tau (daed:check-rel (daed:tran-v-at tr-rc 2 k-tau)
+                             (* Vin (- 1.0 (exp -1.0))) 0.05 1e-6))
+(define a-end (daed:check-rel (daed:tran-v tr-rc 2)
+                             (* Vin (- 1.0 (exp -5.0))) 0.02 1e-6))
+
+(display "A RC v2(tau)=")
+(display (daed:tran-v-at tr-rc 2 k-tau))
+(display " v2(5tau)=")
+(display (daed:tran-v tr-rc 2))
+(newline)
+
+; ── B. RL: vin — R — n2 — L — GND ; v2=Vin e^{-t/τ}, iL=(Vin/R)(1-e^{-t/τ}) ──
+(define ckt-rl
+  (daed:circuit "rl"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:L "l1" 2 0 Lval))))
+
+(define dt-rl (/ tau-rl 100.0))
+(define tr-rl (daed:simulate-tran ckt-rl dt-rl (daed:nsteps-for (* 5.0 tau-rl) dt-rl)))
+(daed:stats-bump! "sim_runs")
+(define b-ok (daed:check-true (daed:tran-ok? tr-rl)))
+(define b-ic-v (daed:check-approx (daed:tran-v-at tr-rl 2 0) 0.0 1e-9))
+(define b-ic-i (daed:check-approx (daed:tran-i-at tr-rl "l1" 0) 0.0 1e-12))
+(define k-rl (daed:nsteps-for tau-rl dt-rl))
+(define b-v-tau (daed:check-rel (daed:tran-v-at tr-rl 2 k-rl)
+                               (* Vin (exp -1.0)) 0.05 1e-6))
+(define b-i-tau (daed:check-rel (daed:tran-i-at tr-rl "l1" k-rl)
+                               (* (/ Vin Rval) (- 1.0 (exp -1.0))) 0.05 1e-9))
+(define b-v-end (daed:check-rel (daed:tran-v tr-rl 2)
+                               (* Vin (exp -5.0)) 0.08 1e-6))
+(define b-i-end (daed:check-rel (daed:tran-i tr-rl "l1")
+                               (* (/ Vin Rval) (- 1.0 (exp -5.0))) 0.02 1e-9))
+
+(display "B RL v2(tau)=")
+(display (daed:tran-v-at tr-rl 2 k-rl))
+(display " iL(tau)=")
+(display (daed:tran-i-at tr-rl "l1" k-rl))
+(display " v2(5tau)=")
+(display (daed:tran-v tr-rl 2))
+(display " iL(5tau)=")
+(display (daed:tran-i tr-rl "l1"))
+(newline)
+
+; ── C. Series RLC: R—L—C, overdamped; v_C → Vin ──
+(define ckt-rlc
+  (daed:circuit "rlc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:L "l1" 2 3 1e-3)
+          (daed:C "c1" 3 0 Cval))))
+
+(define dt-rlc 2e-5)
+(define tr-rlc (daed:simulate-tran ckt-rlc dt-rlc (daed:nsteps-for 0.01 dt-rlc)))
+(daed:stats-bump! "sim_runs")
+(define c-ok (daed:check-true (daed:tran-ok? tr-rlc)))
+(define c-ic (daed:check-approx (daed:tran-v-at tr-rlc 3 0) 0.0 1e-9))
+(define vc-end (daed:tran-v tr-rlc 3))
+(define c-end (daed:check-true (and (number? vc-end) (> vc-end 4.5) (< vc-end 5.05))))
+
+(display "C RLC ok=")
+(display (daed:tran-ok? tr-rlc))
+(display " vC(end)=")
+(display vc-end)
+(newline)
+
+; ── D. Mutate C (1µF → 2µF), re-tran: slower, v2(τ_old) ≈ 5(1-e^{-0.5}) ──
+(define mut (daed:mutate! ckt-rc "c1" (* 2.0 Cval)))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define tr-slow (daed:simulate-tran ckt-rc dt-rc (daed:nsteps-for (* 5.0 tau-rc) dt-rc)))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-true (daed:tran-ok? tr-slow)))
+(define v-slow (daed:tran-v-at tr-slow 2 k-tau))
+(define v-fast (daed:tran-v-at tr-rc 2 k-tau))
+(define d-slower (daed:check-true (and (number? v-slow) (number? v-fast) (< v-slow v-fast))))
+(define d-an (daed:check-rel v-slow (* Vin (- 1.0 (exp -0.5))) 0.06 1e-6))
+
+(display "D mutate C 1u->2u v2(tau)=")
+(display v-slow)
+(display " was=")
+(display v-fast)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(define all-ok
+  (and a-ok a-ic a-tau a-end
+       b-ok b-ic-v b-ic-i b-v-tau b-i-tau b-v-end b-i-end
+       c-ok c-ic c-end
+       mut-ok d-ok d-slower d-an
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)))
+
+(if all-ok
+  (begin
+    (display "PASS: RC/RL/RLC .tran + mutate re-run (escapes=0)")
+    (newline)
+    (display "RESULT pass example=13-tran-suite escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: .tran denseness suite")
+    (newline)
+    (display "RESULT fail example=13-tran-suite")
+    (newline)
+    (display "  a-tau=")
+    (display a-tau)
+    (display " b-v-tau=")
+    (display b-v-tau)
+    (display " b-i-tau=")
+    (display b-i-tau)
+    (display " c-end=")
+    (display c-end)
+    (display " d-slower=")
+    (display d-slower)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

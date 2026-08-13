@@ -240,6 +240,12 @@ Linear `.op` denseness suite ([issue #13](https://github.com/cybrid-systems/daed
 ./scripts/run-aura.sh examples/12-linear-op-suite/main.aura
 ```
 
+Fixed-step `.tran` suite ([issue #14](https://github.com/cybrid-systems/daedalus/issues/14)):
+
+```bash
+./scripts/run-aura.sh examples/13-tran-suite/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

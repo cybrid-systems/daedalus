@@ -57,6 +57,8 @@ required=(
   "examples/11-controlled-sources/README.md"
   "examples/12-linear-op-suite/main.aura"
   "examples/12-linear-op-suite/README.md"
+  "examples/13-tran-suite/main.aura"
+  "examples/13-tran-suite/README.md"
   "scripts/extract-ir.py"
   "scripts/from-image.sh"
   "scripts/run-aura.sh"

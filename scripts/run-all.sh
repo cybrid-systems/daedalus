@@ -17,6 +17,7 @@ PROBES=(
   10-vision-pipeline
   11-controlled-sources
   12-linear-op-suite
+  13-tran-suite
 )
 
 pass=0

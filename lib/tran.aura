@@ -23,6 +23,9 @@
         daed:tran-series
         daed:tran-v
         daed:tran-v-at
+        daed:tran-i
+        daed:tran-i-at
+        daed:tran-i-series
         daed:tran-iters
         daed:tran-nr-fail)
 
@@ -31,7 +34,7 @@
 (require "solve" all:)
 (require "devices" all:)
 
-(define daed:tran-version 2)
+(define daed:tran-version 3)
 
 ; Nearest exact integer (vector indices / make-vector lengths).
 (define (daed:as-int n)
@@ -114,6 +117,21 @@
         (set! node (+ node 1)))))
   #t)
 
+(define (daed:record-iL! iseries comps state k)
+  (let ((iL (hash-ref state "iL" (hash))))
+    (let loop ((cs comps))
+      (if (null? cs)
+        #t
+        (begin
+          (if (equal? (daed:comp-type (car cs)) "L")
+            (let ((nm (daed:comp-name (car cs))))
+              (let ((wv (hash-ref iseries nm #f)))
+                (if wv
+                  (vector-set! wv k (hash-ref iL nm 0.0))
+                  0)))
+            0)
+          (loop (cdr cs)))))))
+
 ; Seed an MNA vector from the previous-step node voltages.
 (define (daed:state->x state n)
   (let ((x (make-vector n 0.0))
@@ -160,6 +178,7 @@
         (hash-set! res "nsteps" 0)
         (hash-set! res "times" (make-vector 0 0.0))
         (hash-set! res "series" (hash))
+        (hash-set! res "iseries" (hash))
         (hash-set! res "n_v" 0)
         (hash-set! res "iters" 0)
         res)
@@ -171,6 +190,7 @@
               (state (daed:make-tran-state comps))
               (times (make-vector (+ ns 1) 0.0))
               (series (hash))
+              (iseries (hash))
               (ok #t)
               (iters 0)
               (nr-fail 0))
@@ -181,7 +201,17 @@
                 (hash-set! series (number->string node)
                            (make-vector nsamp 0.0))
                 (set! node (+ node 1)))))
+          (let loop ((cs comps))
+            (if (null? cs)
+              0
+              (begin
+                (if (equal? (daed:comp-type (car cs)) "L")
+                  (hash-set! iseries (daed:comp-name (car cs))
+                             (make-vector nsamp 0.0))
+                  0)
+                (loop (cdr cs)))))
           (daed:record-step! series times 0.0 n-v state 0)
+          (daed:record-iL! iseries comps state 0)
           (let ((k 1)
                 (t 0.0))
             (while (lambda () (and ok (<= k ns)))
@@ -191,7 +221,9 @@
                   (let ((nr (daed:tran-step-nr! comps dt state)))
                     (set! iters (+ iters (hash-ref nr "iters" 0)))
                     (if (hash-ref nr "ok" #f)
-                      (daed:record-step! series times t n-v state k)
+                      (begin
+                        (daed:record-step! series times t n-v state k)
+                        (daed:record-iL! iseries comps state k))
                       (begin
                         (set! ok #f)
                         (set! nr-fail (+ nr-fail 1)))))
@@ -204,12 +236,14 @@
                         (begin
                           (daed:update-state-voltages! state b n-v)
                           (daed:update-state-iL! comps state dt)
-                          (daed:record-step! series times t n-v state k))))))
+                          (daed:record-step! series times t n-v state k)
+                          (daed:record-iL! iseries comps state k))))))
                 (set! k (+ k 1)))))
           (hash-set! res "ok" ok)
           (hash-set! res "nsteps" ns)
           (hash-set! res "times" times)
           (hash-set! res "series" series)
+          (hash-set! res "iseries" iseries)
           (hash-set! res "n_v" n-v)
           (hash-set! res "final" state)
           (hash-set! res "iters" iters)
@@ -245,6 +279,24 @@
 
 (define (daed:tran-v res node)
   (let ((wv (daed:tran-series res node)))
+    (let ((n (vector-length wv)))
+      (if (<= n 0)
+        0.0
+        (vector-ref wv (- n 1))))))
+
+(define (daed:tran-i-series res name)
+  (let ((iseries (hash-ref res "iseries" (hash))))
+    (hash-ref iseries name (make-vector 0 0.0))))
+
+(define (daed:tran-i-at res name k)
+  (let ((wv (daed:tran-i-series res name))
+        (ki (daed:as-int k)))
+    (if (or (< ki 0) (>= ki (vector-length wv)))
+      0.0
+      (vector-ref wv ki))))
+
+(define (daed:tran-i res name)
+  (let ((wv (daed:tran-i-series res name)))
     (let ((n (vector-length wv)))
       (if (<= n 0)
         0.0

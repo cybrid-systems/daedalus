@@ -62,6 +62,11 @@ No leave from \(V_A\). VCVS/VCCS/CCCS/CCVS stamps are pure Aura on the dense MNA
 No leave from \(V_A\). Branch-current extract reads the existing MNA unknown
 vector; comparison is hand calculation (optional ngspice decks are documentation).
 
+## Issue #14 (fixed-step .tran suite)
+
+No leave from \(V_A\). BE companions for C/L, inductor current series, and
+mutate + re-`.tran` stay on the existing pure-Aura path.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).
