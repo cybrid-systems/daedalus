@@ -27,6 +27,7 @@ PROBES=(
   20-converge-aids
   21-step-temp
   22-monte-carlo
+  23-agent-evolve
 )
 
 pass=0

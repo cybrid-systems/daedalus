@@ -301,6 +301,12 @@ Monte Carlo + yield ([issue #23](https://github.com/cybrid-systems/daedalus/issu
 ./scripts/run-aura.sh examples/22-monte-carlo/main.aura
 ```
 
+Spec-driven agent search ([issue #24](https://github.com/cybrid-systems/daedalus/issues/24)):
+
+```bash
+./scripts/run-aura.sh examples/23-agent-evolve/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

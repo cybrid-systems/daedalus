@@ -1,0 +1,213 @@
+; examples/23-agent-evolve/main.aura
+;
+; Milestone 4 / issue #24 — spec-driven agent parameter search.
+;   A. CE amp: tune Rb so Vc = 2.5 V ± 2 % (hill-climb)
+;   B. Restore any intermediate good snapshot
+;   C. Replay committed mutations on a fresh circuit
+;   D. RC filter: scale C so WHEN 2.5 V ≈ τ ln 2
+;   E. Already-in-spec → skip
+;
+; Axes: spec + O→D→M→V→R + good-state log + .measure
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/23-agent-evolve/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 23-agent-evolve: spec-driven agent search ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " evolve=")
+(display daed:evolve-version)
+(display " agent=")
+(display daed:agent-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:evolve-version)
+                                     (>= daed:evolve-version 1))))
+
+(define Vcc 5.0)
+(define target 2.5)
+(define tol (* target 0.02))
+
+; ── A. CE amplifier bias ──
+(define ckt-ce
+  (daed:circuit "ce"
+    (list (daed:V "vcc" 1 0 Vcc)
+          (daed:R "rc" 1 2 1e3)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 50e3)
+          (daed:Q "q1" 2 3 0))))
+
+(define spec-ce (daed:spec-v 2 target tol))
+(define e-start (daed:eval-spec ckt-ce spec-ce))
+(define a-off (daed:check-true (and (daed:spec-ok? e-start)
+                                    (not (daed:spec-pass? e-start))
+                                    (> (daed:spec-value e-start) 3.5))))
+(define ev-ce (daed:evolve! ckt-ce spec-ce "rb" 20 "hill"))
+(define a-ok (daed:check-true (daed:evo-reached? ev-ce)))
+(define a-v (daed:check-approx (daed:evo-value ev-ce) target tol))
+(define a-steps (daed:check-true (and (> (daed:evo-steps ev-ce) 0)
+                                      (<= (daed:evo-steps ev-ce) 20))))
+(define a-goods (daed:check-true (>= (daed:evo-n-good ev-ce) 2)))
+(define rb-final (daed:comp-value (daed:find-comp ckt-ce "rb")))
+
+(display "A CE start=")
+(display (daed:spec-value e-start))
+(display " vc=")
+(display (daed:evo-value ev-ce))
+(display " steps=")
+(display (daed:evo-steps ev-ce))
+(display " n-good=")
+(display (daed:evo-n-good ev-ce))
+(display " rb=")
+(display rb-final)
+(newline)
+
+; ── B. Restore intermediate then last good ──
+(define g0 (daed:evo-good ev-ce 0))
+(define b-g0 (daed:check-true (and g0
+                                   (number? (hash-ref g0 "param" #f)))))
+(define rst0 (daed:evo-restore-good! ckt-ce ev-ce 0))
+(define rb0 (daed:comp-value (daed:find-comp ckt-ce "rb")))
+(define b-mid (daed:check-true (and rst0
+                                    (> (abs (- rb0 rb-final)) 100.0)
+                                    (< rb0 50e3))))
+(define nlast (- (daed:evo-n-good ev-ce) 1))
+(define rstn (daed:evo-restore-good! ckt-ce ev-ce nlast))
+(define e-last (daed:eval-spec ckt-ce spec-ce))
+(define b-last (daed:check-true (and rstn (daed:spec-pass? e-last))))
+(define rb-back (daed:check-approx
+                  (daed:comp-value (daed:find-comp ckt-ce "rb"))
+                  rb-final 1.0))
+
+(display "B restore-0 rb=")
+(display rb0)
+(display " restore-last pass=")
+(display (daed:spec-pass? e-last))
+(newline)
+
+; ── C. Replay log on a fresh circuit ──
+(define ckt-rp
+  (daed:circuit "ce-rp"
+    (list (daed:V "vcc" 1 0 Vcc)
+          (daed:R "rc" 1 2 1e3)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 50e3)
+          (daed:Q "q1" 2 3 0))))
+(define n-replay (daed:evo-replay! ckt-rp (daed:evo-log ev-ce)))
+(define e-rp (daed:eval-spec ckt-rp spec-ce))
+(define c-n (daed:check-true (>= n-replay 1)))
+(define c-pass (daed:check-true (daed:spec-pass? e-rp)))
+(define c-rb (daed:check-approx
+               (daed:comp-value (daed:find-comp ckt-rp "rb"))
+               rb-final 1.0))
+
+(display "C replay n=")
+(display n-replay)
+(display " vc=")
+(display (daed:spec-value e-rp))
+(display " pass=")
+(display (daed:spec-pass? e-rp))
+(newline)
+
+; ── D. RC WHEN-time (scale) ──
+(define tau 1e-3)
+(define t-want (* tau 0.693147))
+(define ckt-rc
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vcc)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 2e-6))))
+(define dt (/ 2e-3 20.0))
+(define ns (daed:nsteps-for 5e-3 dt))
+(define spec-rc (daed:spec-when 2 2.5 t-want (* t-want 0.08) dt ns))
+(define ev-rc (daed:evolve! ckt-rc spec-rc "c1" 6 "scale"))
+(define d-ok (daed:check-true (daed:evo-reached? ev-rc)))
+(define d-t (daed:check-rel (daed:evo-value ev-rc) t-want 0.08 1e-9))
+(define spec-fin (daed:spec-final 2 Vcc 0.15 dt ns))
+(define e-fin (daed:eval-spec ckt-rc spec-fin))
+(define d-fin (daed:check-true (daed:spec-pass? e-fin)))
+
+(display "D RC t=")
+(display (daed:evo-value ev-rc))
+(display " want=")
+(display t-want)
+(display " C=")
+(display (daed:comp-value (daed:find-comp ckt-rc "c1")))
+(display " final=")
+(display (daed:spec-value e-fin))
+(newline)
+
+; ── E. Already in spec → skip ──
+(define ev-skip (daed:evolve! ckt-ce spec-ce "rb" 4 "hill"))
+(define e-skip (daed:check-true (and (daed:evo-reached? ev-skip)
+                                     (= (daed:evo-steps ev-skip) 0))))
+
+; ── Refuse R<=0 (must be off-spec or evo-try! skips) ──
+(define ckt-bad
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vcc)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+(define spec-bad (daed:spec-v 2 target tol))
+(define bad (daed:evo-try! ckt-bad spec-bad "r2" 0.0))
+(define e-bad (daed:check-true (and (not (hash-ref bad "ok" #f))
+                                    (equal? (hash-ref bad "decision" "") "refuse"))))
+(define bad-unchanged (daed:check-approx
+                        (daed:comp-value (daed:find-comp ckt-bad "r2"))
+                        2e3 1e-9))
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define metrics-ok
+  (daed:check-true
+    (and (>= (daed:stats-ref "agent_rounds") 1)
+         (>= (daed:stats-ref "agent_commits") 1)
+         (>= (daed:stats-ref "rollbacks") 1))))
+
+(define all-ok
+  (and ver-ok
+       a-off a-ok a-v a-steps a-goods
+       b-g0 b-mid b-last rb-back
+       c-n c-pass c-rb
+       d-ok d-t d-fin
+       e-skip e-bad bad-unchanged
+       esc-ok metrics-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: spec-driven agent evolve (escapes=0)")
+    (newline)
+    (display "RESULT pass example=23-agent-evolve escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: agent-evolve denseness probe")
+    (newline)
+    (display "RESULT fail example=23-agent-evolve")
+    (newline)
+    (display "  a-ok=")
+    (display a-ok)
+    (display " a-v=")
+    (display a-v)
+    (display " b-mid=")
+    (display b-mid)
+    (display " b-last=")
+    (display b-last)
+    (display " c-pass=")
+    (display c-pass)
+    (display " d-ok=")
+    (display d-ok)
+    (display " e-skip=")
+    (display e-skip)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

@@ -113,6 +113,14 @@
         daed:loop-once daed:agent-step! daed:autotune daed:autotune!
         daed:step-ok? daed:step-decision daed:step-v daed:step-reason
         daed:tune-ok? daed:tune-steps daed:tune-v daed:tune-reached?
+        ; evolve (issue #24 / M4)
+        daed:evolve-version
+        daed:spec-v daed:spec-when daed:spec-risetime daed:spec-final
+        daed:eval-spec daed:spec-ok? daed:spec-pass? daed:spec-err daed:spec-value
+        daed:evo-try! daed:evolve daed:evolve!
+        daed:evo-ok? daed:evo-reached? daed:evo-steps daed:evo-value daed:evo-err
+        daed:evo-log daed:evo-n-good daed:evo-good
+        daed:evo-restore-good! daed:evo-replay!
         ; viz (issue #1)
         daed:viz-version
         daed:string-has? daed:num->str
@@ -153,6 +161,7 @@
 (require "mc" all:)
 (require "mutate-circuit" all:)
 (require "agent" all:)
+(require "evolve" all:)
 (require "viz" all:)
 (require "ir" all:)
 (require "validate" all:)
@@ -511,6 +520,36 @@
                     (set! steps lim)
                     0)
                   (loop))))))))))
+
+; Metered spec-driven search (issue #24).
+(define (daed:evolve! ckt spec name max-steps strategy)
+  (let ((r (daed:evolve ckt spec name max-steps strategy)))
+    (let ((lg (daed:evo-log r))
+          (i 0)
+          (n 0))
+      (set! n (vector-length lg))
+      (while (lambda () (< i n))
+        (lambda ()
+          (let ((e (vector-ref lg i)))
+            (let ((d (if e (hash-ref e "decision" "") "")))
+              (daed:stats-bump! "agent_rounds")
+              (daed:stats-bump! "sim_runs")
+              (if (equal? d "commit")
+                (begin
+                  (daed:stats-bump! "mutations")
+                  (daed:stats-bump! "agent_commits"))
+                0)
+              (if (equal? d "skip")
+                (daed:stats-bump! "agent_skips")
+                0)
+              (if (equal? d "rollback")
+                (daed:stats-bump! "rollbacks")
+                0)
+              (if (equal? d "refuse")
+                (daed:stats-bump! "agent_refuses")
+                0)))
+          (set! i (+ i 1)))))
+    r))
 
 ; ── Checks ──
 (define (daed:check-eq actual expected)

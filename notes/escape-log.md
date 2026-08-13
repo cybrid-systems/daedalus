@@ -115,6 +115,11 @@ No leave from \(V_A\). Park-Miller + polar gauss and trial loops stay on
 the existing mutate / `.op` / `.tran` / `.measure` path. Seeded, so probes
 are deterministic.
 
+## Issue #24 (agent evolve)
+
+No leave from \(V_A\). Spec eval, hill-climb / scale search, good-state
+snapshots, and log replay stay on mutate + `.op` / `.tran` / `.measure`.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).
