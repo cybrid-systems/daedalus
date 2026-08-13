@@ -104,7 +104,8 @@
       (if (equal? type "L") "H"
         (if (equal? type "V") "V"
           (if (equal? type "I") "A"
-            (if (or (equal? type "D") (equal? type "Q")) "A" "")))))))
+            (if (or (equal? type "D") (equal? type "Q")) "A"
+              (if (equal? type "M") "A/V²" ""))))))))
 
 (define (daed:comp-color type)
   (if (equal? type "R") "#b45309"
@@ -114,9 +115,10 @@
           (if (equal? type "I") "#047857"
             (if (equal? type "D") "#c2410c"
               (if (equal? type "Q") "#1d4ed8"
+                (if (equal? type "M") "#0f766e"
                 (if (or (equal? type "E") (equal? type "G")
                         (equal? type "F") (equal? type "H"))
-                  "#7c3aed" "#334")))))))))
+                  "#7c3aed" "#334"))))))))))
 
 (define (daed:svg-comp c)
   (let ((n1 (daed:comp-n1 c))

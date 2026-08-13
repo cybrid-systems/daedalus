@@ -271,6 +271,12 @@ Adaptive `.tran` (LTE step control) ([issue #18](https://github.com/cybrid-syste
 ./scripts/run-aura.sh examples/17-adapt-tran/main.aura
 ```
 
+Level-1 NMOS ([issue #19](https://github.com/cybrid-systems/daedalus/issues/19)):
+
+```bash
+./scripts/run-aura.sh examples/18-mosfet/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

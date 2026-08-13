@@ -2,9 +2,9 @@
 ;
 ; (require "devices" all:)
 ;
-; Shockley diode and Ebers-Moll NPN. Educational-grade, FlatAST-friendly.
+; Shockley diode, Ebers-Moll NPN, Level-1 NMOS (Shichman-Hodges).
 ; Voltage limiting (SPICE pnjlim) + gmin keep dense NR inside V_A.
-; Linear stamp path is unchanged; this module only runs when D/Q are present.
+; Linear stamp path is unchanged; this module only runs when D/Q/M are present.
 
 (export daed:devices-version
         daed:clip-exp
@@ -20,6 +20,7 @@
         daed:res-add!
         daed:stamp-diode-nr!
         daed:stamp-bjt-nr!
+        daed:stamp-mos-nr!
         daed:stamp-nonlinear!
         daed:stamp-system-nr
         daed:stamp-system-nr-tran)
@@ -27,7 +28,8 @@
 (require "netlist" all:)
 (require "stamp" all:)
 
-(define daed:devices-version 1)
+; 2 = issue #19 Level-1 MOSFET
+(define daed:devices-version 2)
 
 (define daed:exp-clip 40.0)
 (define daed:sqrt2 1.414213562)
@@ -270,6 +272,120 @@
         (daed:jac-add! J n ne ne (* -1.0 dIe-dVbe))
         #t))))
 
+; ── Level-1 NMOS (Shichman-Hodges), bulk = source ──
+; β = Kp W/L
+; cutoff  Vgs ≤ Vto:            Ids = 0
+; linear  0 < Vds < Vgs−Vto:    Ids = β ((Vgs−Vto) Vds − Vds²/2) (1+λ Vds)
+; sat     Vds ≥ Vgs−Vto:        Ids = (β/2) (Vgs−Vto)² (1+λ Vds)
+; Reverse Vds < 0 swaps drain/source.
+(define (daed:stamp-mos-nr! J F n x x-old c)
+  (let ((nd (daed:comp-n1 c))
+        (ng (daed:comp-n2 c))
+        (ns (daed:comp-n3 c))
+        (kp (daed:comp-value c))
+        (w (hash-ref c "w" 20e-6))
+        (l (hash-ref c "l" 2e-6))
+        (vto (hash-ref c "vto" 0.8))
+        (lam (hash-ref c "lambda" 0.0))
+        (gmin (hash-ref c "gmin" 1e-12))
+        (d 0)
+        (s 0)
+        (vd 0.0)
+        (vg 0.0)
+        (vs 0.0)
+        (vds 0.0)
+        (vgs 0.0)
+        (vov 0.0)
+        (beta 0.0)
+        (mlam 1.0)
+        (ids0 0.0)
+        (ids 0.0)
+        (gm 0.0)
+        (gds 0.0))
+    (if (or (not (number? kp)) (<= kp 0.0)
+            (not (number? w)) (<= w 0.0)
+            (not (number? l)) (<= l 0.0)
+            (not (number? vto)))
+      #f
+      (begin
+        (set! vg (daed:x-v x ng))
+        (set! vd (daed:x-v x nd))
+        (set! vs (daed:x-v x ns))
+        (set! vds (- vd vs))
+        (if (>= vds 0.0)
+          (begin (set! d nd) (set! s ns))
+          (begin
+            (set! d ns)
+            (set! s nd)
+            (set! vds (* -1.0 vds))
+            (set! vd (daed:x-v x d))
+            (set! vs (daed:x-v x s))))
+        (set! vgs (- vg vs))
+        (set! beta (* kp (/ w l)))
+        (if (or (not (number? lam)) (< lam 0.0))
+          (set! lam 0.0)
+          0)
+        (if (or (not (number? gmin)) (< gmin 0.0))
+          (set! gmin 1e-12)
+          0)
+        (set! vov (- vgs vto))
+        (if (<= vov 0.0)
+          (begin
+            (set! ids 0.0)
+            (set! gm 0.0)
+            (set! gds gmin))
+          (begin
+            (set! mlam (+ 1.0 (* lam vds)))
+            (if (< vds vov)
+              (begin
+                (set! ids0 (* beta (- (* vov vds) (* 0.5 (* vds vds)))))
+                (set! ids (* ids0 mlam))
+                (set! gm (* (* beta vds) mlam))
+                (set! gds (+ (* (* beta (- vov vds)) mlam)
+                             (* lam ids0)
+                             gmin)))
+              (begin
+                (set! ids0 (* (* 0.5 beta) (* vov vov)))
+                (set! ids (* ids0 mlam))
+                (set! gm (* (* beta vov) mlam))
+                (set! gds (+ (* lam ids0) gmin))))))
+        (daed:jac-add! J n d d gds)
+        (daed:jac-add! J n d s (* -1.0 (+ gds gm)))
+        (daed:jac-add! J n d ng gm)
+        (daed:jac-add! J n s d (* -1.0 gds))
+        (daed:jac-add! J n s s (+ gds gm))
+        (daed:jac-add! J n s ng (* -1.0 gm))
+        (daed:res-add! F d ids)
+        (daed:res-add! F s (* -1.0 ids))
+        #t))))
+
+; Constant Cgs / Cgd BE companions (only used on the .tran NR path).
+(define (daed:stamp-one-cap-be! J F n x state h na nb C)
+  (if (or (not (number? C)) (<= C 0.0) (not (number? h)) (<= h 0.0))
+    #f
+    (let ((Geq (/ C h))
+          (vprev (hash-ref state "v" (make-vector 1 0.0))))
+      (let ((vold (- (daed:node-voltage vprev na)
+                     (daed:node-voltage vprev nb)))
+            (vnow (- (daed:x-v x na) (daed:x-v x nb))))
+        (daed:stamp-G! J n na nb Geq)
+        (daed:stamp-I-res! F na nb (* Geq (- vnow vold)))
+        #t))))
+
+(define (daed:stamp-mos-caps! J F n x state h comps)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (if (equal? (daed:comp-type (car cs)) "M")
+          (let ((c (car cs)))
+            (daed:stamp-one-cap-be! J F n x state h
+              (daed:comp-n2 c) (daed:comp-n3 c) (hash-ref c "cgs" 0.0))
+            (daed:stamp-one-cap-be! J F n x state h
+              (daed:comp-n2 c) (daed:comp-n1 c) (hash-ref c "cgd" 0.0)))
+          0)
+        (loop (cdr cs))))))
+
 (define (daed:stamp-nonlinear! J F n x x-old comps)
   (let loop ((cs comps))
     (if (null? cs)
@@ -281,6 +397,8 @@
              (daed:stamp-diode-nr! J F n x x-old (car cs)))
             ((equal? ty "Q")
              (daed:stamp-bjt-nr! J F n x x-old (car cs)))
+            ((equal? ty "M")
+             (daed:stamp-mos-nr! J F n x x-old (car cs)))
             (else 0)))
         (loop (cdr cs))))))
 
@@ -313,4 +431,5 @@
               (xo (if x-old x-old (make-vector N 0.0))))
           (let ((F (daed:ax-minus-b A xx b N)))
             (daed:stamp-nonlinear! A F N xx xo comps)
+            (daed:stamp-mos-caps! A F N xx state h comps)
             (list N A F n-v)))))))

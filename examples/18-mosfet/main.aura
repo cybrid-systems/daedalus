@@ -1,0 +1,223 @@
+; examples/18-mosfet/main.aura
+;
+; Milestone 2 / issue #19 — Level-1 NMOS (Shichman-Hodges) + NR .op + adapt .tran.
+;   A. Resistive-load inverter cutoff (Vin=0) → vout ≈ Vdd
+;   B. Inverter on (Vin=5) → linear-region hand calc vout ≈ 0.566 V
+;   C. Common-source mid-rail bias
+;   D. Mutate Vto + restore
+;   E. Adaptive .tran of switched MOSFET+RC load
+;
+; Defaults: Kp=2e-4, W/L=10, Vto=0.8, λ=0
+; Axes: MOSFET stamp + Jacobian + mutate-param + adaptive BE
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/18-mosfet/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 18-mosfet: Level-1 NMOS denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " devices=")
+(display daed:devices-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:netlist-version)
+                                     (>= daed:netlist-version 5)
+                                     (number? daed:devices-version)
+                                     (>= daed:devices-version 2))))
+
+(define Vdd 5.0)
+(define Rinv 1e3)
+(define Rcs 5e3)
+(define Vto 0.8)
+(define Kp 2e-4)
+(define W 20e-6)
+(define L 2e-6)
+(define beta (* Kp (/ W L)))
+
+; Linear-region inverter: Vout² − 9.4 Vout + 5 = 0 → 0.5663 V
+(define want-on 0.5663)
+; CS sat: Vov=√0.5, Vin=Vto+Vov, Ids=0.5 mA, Vout=2.5
+(define vov (sqrt 0.5))
+(define vin-cs (+ Vto vov))
+(define want-cs 2.5)
+
+(define (mk-inv vin)
+  (daed:circuit "nmos-inv"
+    (list (daed:V "vdd" 1 0 Vdd)
+          (daed:R "rd" 1 2 Rinv)
+          (daed:M* "m1" 2 3 0 Kp W L Vto)
+          (daed:V "vin" 3 0 vin))))
+
+; ── A. Cutoff ──
+(define ckt-off (mk-inv 0.0))
+(define topo (daed:check-true (daed:topology-ok? ckt-off)))
+(define nl (daed:check-true (daed:has-nonlinear? (daed:ckt-comps ckt-off))))
+(define m1 (daed:find-comp ckt-off "m1"))
+(define term-ok (daed:check-true (and (equal? (daed:comp-nd m1) 2)
+                                     (equal? (daed:comp-ng m1) 3)
+                                     (equal? (daed:comp-ns m1) 0))))
+(define op-off (daed:simulate-op ckt-off))
+(daed:stats-bump! "sim_runs")
+(define off-ok (daed:check-true (daed:op-ok? op-off)))
+(define v-off (daed:v op-off 2))
+(define off-v (daed:check-approx v-off Vdd 0.05))
+
+(display "A cutoff ok=")
+(display (daed:op-ok? op-off))
+(display " vout=")
+(display v-off)
+(display " iters=")
+(display (daed:op-iters op-off))
+(newline)
+
+; ── B. Inverter on ──
+(define ckt-on (mk-inv 5.0))
+(define op-on (daed:simulate-op ckt-on))
+(daed:stats-bump! "sim_runs")
+(define on-ok (daed:check-true (daed:op-ok? op-on)))
+(define v-on (daed:v op-on 2))
+(define on-v (daed:check-approx v-on want-on 0.03))
+(define on-low (daed:check-true (and (number? v-on) (< v-on 1.0))))
+
+(display "B on ok=")
+(display (daed:op-ok? op-on))
+(display " vout=")
+(display v-on)
+(display " want=")
+(display want-on)
+(newline)
+
+; ── C. Common-source mid-rail ──
+(define ckt-cs
+  (daed:circuit "nmos-cs"
+    (list (daed:V "vdd" 1 0 Vdd)
+          (daed:R "rd" 1 2 Rcs)
+          (daed:M* "m1" 2 3 0 Kp W L Vto)
+          (daed:V "vin" 3 0 vin-cs))))
+(define op-cs (daed:simulate-op ckt-cs))
+(daed:stats-bump! "sim_runs")
+(define cs-ok (daed:check-true (daed:op-ok? op-cs)))
+(define v-cs (daed:v op-cs 2))
+(define cs-v (daed:check-approx v-cs want-cs 0.08))
+
+(display "C CS ok=")
+(display (daed:op-ok? op-cs))
+(display " vout=")
+(display v-cs)
+(display " want=")
+(display want-cs)
+(display " vin=")
+(display vin-cs)
+(newline)
+
+; ── D. Mutate Vto ──
+(define snap (daed:snapshot ckt-on "pre-vto"))
+(define vto0 (daed:comp-param (daed:find-comp ckt-on "m1") "vto" 0.0))
+(define mut (daed:mutate-param! ckt-on "m1" "vto" 1.2))
+(define mut-ok (daed:check-true (hash-ref mut "ok" #f)))
+(define op-m (daed:simulate-op ckt-on))
+(daed:stats-bump! "sim_runs")
+(define v-m (daed:v op-m 2))
+(define mut-up (daed:check-true (and (number? v-m) (> v-m v-on))))
+(define rst (daed:restore! ckt-on snap))
+(define rst-ok (daed:check-true rst))
+(define vto1 (daed:comp-param (daed:find-comp ckt-on "m1") "vto" 0.0))
+(define vto-back (daed:check-approx vto1 vto0 1e-12))
+
+(display "D mutate Vto ")
+(display vto0)
+(display " -> 1.2 vout=")
+(display v-m)
+(display " restore=")
+(display vto1)
+(newline)
+
+; ── E. Adaptive .tran switched load ──
+(define Cval 1e-6)
+(define tau (* Rinv Cval))
+(define ckt-sw-off
+  (daed:circuit "mos-sw-off"
+    (list (daed:V "vdd" 1 0 Vdd)
+          (daed:R "rd" 1 2 Rinv)
+          (daed:C "c1" 2 0 Cval)
+          (daed:M* "m1" 2 3 0 Kp W L Vto)
+          (daed:V "vin" 3 0 0.0))))
+(define tr-off (daed:simulate-tran-adapt ckt-sw-off (* 5.0 tau) (/ tau 20.0)))
+(daed:stats-bump! "sim_runs")
+(define tr-off-ok (daed:check-true (daed:tran-ok? tr-off)))
+(define v-tr-off (daed:tran-v tr-off 2))
+(define tr-off-v (daed:check-rel v-tr-off Vdd 0.03 1e-6))
+
+(define ckt-sw-on
+  (daed:circuit "mos-sw-on"
+    (list (daed:V "vdd" 1 0 Vdd)
+          (daed:R "rd" 1 2 Rinv)
+          (daed:C "c1" 2 0 Cval)
+          (daed:M* "m1" 2 3 0 Kp W L Vto)
+          (daed:V "vin" 3 0 5.0))))
+(define tr-on (daed:simulate-tran-adapt ckt-sw-on (* 5.0 tau) (/ tau 20.0)))
+(daed:stats-bump! "sim_runs")
+(define tr-on-ok (daed:check-true (daed:tran-ok? tr-on)))
+(define v-tr-on (daed:tran-v tr-on 2))
+(define tr-on-v (daed:check-approx v-tr-on want-on 0.05))
+
+(display "E tran-off vend=")
+(display v-tr-off)
+(display " acc=")
+(display (daed:tran-accepted tr-off))
+(display " tran-on vend=")
+(display v-tr-on)
+(display " acc=")
+(display (daed:tran-accepted tr-on))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok topo nl term-ok
+       off-ok off-v
+       on-ok on-v on-low
+       cs-ok cs-v
+       mut-ok mut-up rst-ok vto-back
+       tr-off-ok tr-off-v tr-on-ok tr-on-v
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 5)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: Level-1 NMOS .op + adapt .tran (escapes=0)")
+    (newline)
+    (display "RESULT pass example=18-mosfet escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: MOSFET denseness probe")
+    (newline)
+    (display "RESULT fail example=18-mosfet")
+    (newline)
+    (display "  off-v=")
+    (display off-v)
+    (display " on-v=")
+    (display on-v)
+    (display " cs-v=")
+    (display cs-v)
+    (display " mut-up=")
+    (display mut-up)
+    (display " tr-off-ok=")
+    (display tr-off-ok)
+    (display " tr-on-ok=")
+    (display tr-on-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

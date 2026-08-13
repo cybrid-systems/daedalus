@@ -20,11 +20,13 @@
         ; netlist
         daed:netlist-version
         daed:comp daed:R daed:C daed:L daed:V daed:I daed:D daed:D* daed:Q daed:Q*
+        daed:M daed:M*
         daed:E daed:G daed:F daed:H
         daed:circuit
         daed:ckt-name daed:ckt-comps
         daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2 daed:comp-n3
         daed:comp-n4 daed:comp-nc daed:comp-nb daed:comp-ne
+        daed:comp-nd daed:comp-ng daed:comp-ns
         daed:comp-nc+ daed:comp-nc- daed:comp-ctrl daed:comp-terminals
         daed:comp-value daed:comp-set-value!
         daed:comp-set-n1! daed:comp-set-n2! daed:comp-set-n3! daed:comp-set-n4!
@@ -45,7 +47,7 @@
         daed:devices-version
         daed:clip-exp daed:pnjlim daed:diode-vcrit
         daed:stamp-system-nr daed:stamp-system-nr-tran
-        daed:stamp-diode-nr! daed:stamp-bjt-nr!
+        daed:stamp-diode-nr! daed:stamp-bjt-nr! daed:stamp-mos-nr!
         ; solve
         daed:solve-version daed:dense-solve! daed:newton-solve
         daed:simulate-op daed:simulate-op-from daed:simulate-op-gmin

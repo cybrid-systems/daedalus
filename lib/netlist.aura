@@ -4,7 +4,7 @@
 ;
 ; FlatAST-friendly hashes + component lists. Node 0 is GND.
 ; Components: R, C, L, independent V / I, diode D, BJT Q (NPN),
-; controlled sources E (VCVS), G (VCCS), F (CCCS), H (CCVS).
+; MOSFET M (Level-1 NMOS), controlled sources E/G/F/H.
 
 (export daed:netlist-version
         daed:comp
@@ -17,6 +17,8 @@
         daed:D*
         daed:Q
         daed:Q*
+        daed:M
+        daed:M*
         daed:E
         daed:G
         daed:F
@@ -33,6 +35,9 @@
         daed:comp-nc
         daed:comp-nb
         daed:comp-ne
+        daed:comp-nd
+        daed:comp-ng
+        daed:comp-ns
         daed:comp-nc+
         daed:comp-nc-
         daed:comp-ctrl
@@ -58,7 +63,8 @@
         daed:set-node-voltage!
         daed:x-v)
 
-(define daed:netlist-version 4)
+; 5 = issue #19 Level-1 MOSFET
+(define daed:netlist-version 5)
 
 ; Default Shockley / Ebers-Moll parameters (educational Si).
 (define daed:default-is 1e-14)
@@ -68,12 +74,20 @@
 (define daed:default-br 1.0)
 (define daed:default-gmin 1e-12)
 (define daed:default-q-is 1e-15)
+(define daed:default-kp 2e-4)
+(define daed:default-w 20e-6)
+(define daed:default-l 2e-6)
+(define daed:default-vto 0.8)
+(define daed:default-lambda 0.0)
+(define daed:default-cgs 0.0)
+(define daed:default-cgd 0.0)
 
 ; ── Component constructors ──
-; type: "R" | "C" | "L" | "V" | "I" | "D" | "Q" | "E" | "G" | "F" | "H"
+; type: "R" | "C" | "L" | "V" | "I" | "D" | "Q" | "M" | "E" | "G" | "F" | "H"
 ; n1, n2: integer node ids (0 = GND)
 ; Q uses n3 = emitter; n1 = collector, n2 = base
-; value: ohms | farads | henries | volts | amps | Is (D/Q)
+; M uses n3 = source; n1 = drain, n2 = gate (bulk tied to source)
+; value: ohms | farads | henries | volts | amps | Is (D/Q) | Kp (M)
 
 (define (daed:comp type name n1 n2 value)
   (let ((h (hash)))
@@ -122,6 +136,22 @@
 
 (define (daed:Q name nc nb ne)
   (daed:Q* name nc nb ne daed:default-q-is daed:default-bf daed:default-br daed:default-vt))
+
+; Level-1 NMOS: n1 = drain, n2 = gate, n3 = source. value = Kp (A/V²).
+(define (daed:M* name nd ng ns kp w l vto)
+  (let ((h (daed:comp "M" name nd ng kp)))
+    (hash-set! h "n3" ns)
+    (hash-set! h "w" w)
+    (hash-set! h "l" l)
+    (hash-set! h "vto" vto)
+    (hash-set! h "lambda" daed:default-lambda)
+    (hash-set! h "cgs" daed:default-cgs)
+    (hash-set! h "cgd" daed:default-cgd)
+    (hash-set! h "gmin" daed:default-gmin)
+    h))
+
+(define (daed:M name nd ng ns)
+  (daed:M* name nd ng ns daed:default-kp daed:default-w daed:default-l daed:default-vto))
 
 ; VCVS E: v(n1,n2) = mu * v(nc+,nc-). value = mu.
 (define (daed:E name n1 n2 nc+ nc- mu)
@@ -191,6 +221,15 @@
 (define (daed:comp-ne c)
   (daed:comp-n3 c))
 
+(define (daed:comp-nd c)
+  (daed:comp-n1 c))
+
+(define (daed:comp-ng c)
+  (daed:comp-n2 c))
+
+(define (daed:comp-ns c)
+  (daed:comp-n3 c))
+
 (define (daed:comp-nc+ c)
   (daed:comp-n3 c))
 
@@ -205,7 +244,7 @@
 (define (daed:comp-terminals c)
   (let ((ty (daed:comp-type c))
         (acc (list (daed:comp-n1 c) (daed:comp-n2 c))))
-    (if (equal? ty "Q")
+    (if (or (equal? ty "Q") (equal? ty "M"))
       (set! acc (cons (daed:comp-n3 c) acc))
       0)
     (if (or (equal? ty "E") (equal? ty "G"))
@@ -241,7 +280,8 @@
 
 (define (daed:has-nonlinear? comps)
   (or (> (daed:count-type comps "D") 0)
-      (> (daed:count-type comps "Q") 0)))
+      (> (daed:count-type comps "Q") 0)
+      (> (daed:count-type comps "M") 0)))
 
 ; Highest node id appearing in the netlist (includes BJT emitter / E,G sense).
 (define (daed:max-node comps)

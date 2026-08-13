@@ -22,6 +22,7 @@ PROBES=(
   15-nr-helpers
   16-nl-op-suite
   17-adapt-tran
+  18-mosfet
 )
 
 pass=0

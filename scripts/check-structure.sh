@@ -67,6 +67,8 @@ required=(
   "examples/16-nl-op-suite/README.md"
   "examples/17-adapt-tran/main.aura"
   "examples/17-adapt-tran/README.md"
+  "examples/18-mosfet/main.aura"
+  "examples/18-mosfet/README.md"
   "examples/16-nl-op-suite/ref/ngspice.tsv"
   "examples/16-nl-op-suite/spice/diode-bias.cir"
   "examples/16-nl-op-suite/spice/diode-series.cir"

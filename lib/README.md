@@ -5,13 +5,13 @@
 | Module | Phase | Role |
 |--------|-------|------|
 | `daedalus-min.aura` | 0–5 | Facade: version + metrology + re-exports (`daed:*`) |
-| `netlist.aura` | 1–5 / M0 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`/`E`/`G`/`F`/`H`) |
+| `netlist.aura` | 1–5 / M0 / M2 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`/`M`/`E`/`G`/`F`/`H`) |
 | `stamp.aura` | 1–2 / M0 | MNA stamp: DC + BE + controlled sources |
-| `devices.aura` | 5 | Shockley diode + Ebers-Moll NPN + NR residual/Jacobian |
+| `devices.aura` | 5 / M2 | Shockley + Ebers-Moll NPN + Level-1 NMOS + NR residual/Jacobian |
 | `solve.aura` | 1 / 5 / M0 / M1 | Dense GE + linear `.op` + NR (line-search, hist, gmin) |
 | `tran.aura` | 2 / 5 / M0 / M2 | Fixed-step BE `.tran` + LTE adaptive step control |
 | `probe.aura` | 1–2 | Node voltage / series query |
-| `mutate-circuit.aura` | 3–5 / M0 | Value + topology mutate; circuit snapshot (incl. D/Q / E–H) |
+| `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
 | `ir.aura` | issue #6 | `daedalus-ir/1` + unit parse + `IR → circuit` |

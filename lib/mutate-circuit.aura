@@ -47,6 +47,12 @@
   (hash-set! dst "bf" (hash-ref src "bf" 100.0))
   (hash-set! dst "br" (hash-ref src "br" 1.0))
   (hash-set! dst "gmin" (hash-ref src "gmin" 1e-12))
+  (hash-set! dst "w" (hash-ref src "w" 20e-6))
+  (hash-set! dst "l" (hash-ref src "l" 2e-6))
+  (hash-set! dst "vto" (hash-ref src "vto" 0.8))
+  (hash-set! dst "lambda" (hash-ref src "lambda" 0.0))
+  (hash-set! dst "cgs" (hash-ref src "cgs" 0.0))
+  (hash-set! dst "cgd" (hash-ref src "cgd" 0.0))
   dst)
 
 (define (daed:clone-comp c)
@@ -92,7 +98,7 @@
   (if (not (number? value))
     #f
     (if (or (equal? type "R") (equal? type "C") (equal? type "L")
-            (equal? type "D") (equal? type "Q"))
+            (equal? type "D") (equal? type "Q") (equal? type "M"))
       (> value 0.0)
       #t)))
 
@@ -102,9 +108,13 @@
     #f
     (if (or (equal? key "n") (equal? key "vt") (equal? key "bf")
             (equal? key "br") (equal? key "gmin") (equal? key "value")
-            (equal? key "Is") (equal? key "is"))
+            (equal? key "Is") (equal? key "is")
+            (equal? key "w") (equal? key "l") (equal? key "kp")
+            (equal? key "Kp"))
       (> val 0.0)
-      #t)))
+      (if (or (equal? key "lambda") (equal? key "cgs") (equal? key "cgd"))
+        (>= val 0.0)
+        #t))))
 
 (define (daed:name-seen? name seen)
   (let loop ((xs seen))
@@ -136,7 +146,8 @@
                       (not (string? type))
                       (not (daed:node-ok? n1))
                       (not (daed:node-ok? n2))
-                      (and (equal? type "Q") (not (daed:node-ok? n3)))
+                      (and (or (equal? type "Q") (equal? type "M"))
+                           (not (daed:node-ok? n3)))
                       (and (or (equal? type "E") (equal? type "G"))
                            (or (not (daed:node-ok? n3))
                                (not (daed:node-ok? n4))))

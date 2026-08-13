@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0 + M1 + M2** — probes **00–03, 05–17** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0 + M1 + M2** — probes **00–03, 05–18** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -50,6 +50,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [15](../examples/15-nr-helpers/) | NR helpers (issue #16) | **PASS** | 0 | 0 |
 | [16](../examples/16-nl-op-suite/) | nonlinear `.op` vs ngspice (issue #17) | **PASS** | 0 | 0 |
 | [17](../examples/17-adapt-tran/) | LTE adaptive `.tran` (issue #18) | **PASS** | 0 | 0 |
+| [18](../examples/18-mosfet/) | Level-1 NMOS (issue #19) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -103,6 +104,12 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - `daed:simulate-tran-adapt`: Backward-Euler LTE, grow/shrink with reject, min/max dt.
 - First step skips LTE (no \(\dot x\)); later `err = (h/2)|\dot x_n-\dot x_{n-1}| / (\mathrm{reltol}|x|+\mathrm{abstol})`.
 - Probe 17: RC `dt` at the edge is ≪ flat-tail `dt`; `v(τ)` / `v(5τ)` match analytic and a fine fixed-step; fast RC and diode clamp finish. Fixed-step path unchanged.
+
+### Issue #19 narrative (Level-1 MOSFET)
+
+- `daed:M` / `daed:M*`: Shichman-Hodges NMOS (cutoff / linear / sat), bulk=source.
+- Jacobian `gm`/`gds` on the existing NR kernel; optional constant `Cgs`/`Cgd` on `.tran`.
+- `Kp`, `W`, `L`, `Vto`, `λ` are mutable. Probe 18: inverter off/on vs hand calc, CS mid-rail, Vto mutate+restore, adaptive switched-load `.tran`.
 
 ## Judgment
 

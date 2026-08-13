@@ -88,6 +88,11 @@ host oracle (`scripts/compare-ngspice.sh`), same class as the #13 decks.
 No leave from \(V_A\). Adaptive BE uses the existing companion stamp + dense
 GE / NR. Fixed-step `simulate-tran` is unchanged.
 
+## Issue #19 (Level-1 MOSFET)
+
+No leave from \(V_A\). Shichman-Hodges stamp and Jacobian stay on the dense
+NR + BE path. Parameters are ordinary FlatAST hash fields.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).
