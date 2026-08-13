@@ -1,0 +1,192 @@
+; examples/08-bjt-ce/main.aura
+;
+; Phase 5 denseness probe — Ebers-Moll NPN + NR .op.
+;   * switch: off (Vin=0) collector ≈ Vcc; on (Vin=5) collector saturated
+;   * CE stage: mid-rail bias, small-signal gain is inverting
+;
+; Axes: BJT Jacobian + NR + param mutate + metrology
+; Escapes on core path: 0
+;
+; Binding note: prefer top-level / let* over internal define.
+;
+; Run: ./scripts/run-aura.sh examples/08-bjt-ce/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 08-bjt-ce: Ebers-Moll NPN + NR .op denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " devices=")
+(display daed:devices-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define Vcc 5.0)
+(define Rc 1e3)
+(define Rb 10e3)
+
+; nodes: 1=Vcc, 2=collector, 3=base, 4=Vin
+(define ckt-off
+  (daed:circuit "q-off"
+    (list (daed:V "vcc" 1 0 Vcc)
+          (daed:R "rc" 1 2 Rc)
+          (daed:V "vin" 4 0 0.0)
+          (daed:R "rb" 4 3 Rb)
+          (daed:Q "q1" 2 3 0))))
+
+(define topo-off (daed:check-true (daed:topology-ok? ckt-off)))
+(define nl-q (daed:check-true (daed:has-nonlinear? (daed:ckt-comps ckt-off))))
+
+(define op-off (daed:simulate-op ckt-off))
+(daed:stats-bump! "sim_runs")
+
+(define ok-off (daed:op-ok? op-off))
+(define vc-off (daed:v op-off 2))
+(define vb-off (daed:v op-off 3))
+(define off-flag (daed:check-true ok-off))
+(define vc-off-ok (daed:check-approx vc-off Vcc 0.05))
+(define vb-off-ok (daed:check-approx vb-off 0.0 0.05))
+
+(display "switch-off ok=")
+(display ok-off)
+(display " vc=")
+(display vc-off)
+(display " vb=")
+(display vb-off)
+(display " iters=")
+(display (daed:op-iters op-off))
+(newline)
+
+(define ckt-on
+  (daed:circuit "q-on"
+    (list (daed:V "vcc" 1 0 Vcc)
+          (daed:R "rc" 1 2 Rc)
+          (daed:V "vin" 4 0 5.0)
+          (daed:R "rb" 4 3 Rb)
+          (daed:Q "q1" 2 3 0))))
+
+(define op-on (daed:simulate-op ckt-on))
+(daed:stats-bump! "sim_runs")
+
+(define ok-on (daed:op-ok? op-on))
+(define vc-on (daed:v op-on 2))
+(define vb-on (daed:v op-on 3))
+(define on-flag (daed:check-true ok-on))
+(define sat-ok (daed:check-true (and (number? vc-on) (< vc-on 0.5))))
+(define vbe-ok (daed:check-true (and (number? vb-on) (> vb-on 0.6) (< vb-on 0.9))))
+
+(display "switch-on ok=")
+(display ok-on)
+(display " vc=")
+(display vc-on)
+(display " vb=")
+(display vb-on)
+(display " iters=")
+(display (daed:op-iters op-on))
+(newline)
+
+; CE amp: Vin=1.2, Rb=20k, Rc=1k → mid-rail collector at β=100
+(define Rb-ce 20e3)
+(define ckt-ce
+  (daed:circuit "q-ce"
+    (list (daed:V "vcc" 1 0 Vcc)
+          (daed:R "rc" 1 2 Rc)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 Rb-ce)
+          (daed:Q "q1" 2 3 0))))
+
+(define op-ce (daed:simulate-op ckt-ce))
+(daed:stats-bump! "sim_runs")
+(define vc0 (daed:v op-ce 2))
+(define vb0 (daed:v op-ce 3))
+(define ce-ok (daed:check-true (daed:op-ok? op-ce)))
+(define bias-ok
+  (daed:check-true (and (number? vc0) (> vc0 1.0) (< vc0 4.0))))
+(define vbe-ce-ok
+  (daed:check-true (and (number? vb0) (> vb0 0.6) (< vb0 0.85))))
+
+(display "ce-bias ok=")
+(display (daed:op-ok? op-ce))
+(display " vc=")
+(display vc0)
+(display " vb=")
+(display vb0)
+(display " iters=")
+(display (daed:op-iters op-ce))
+(newline)
+
+(define mut-vin (daed:mutate! ckt-ce "vin" 1.22))
+(define mut-vin-ok (daed:check-true (daed:mutate-ok? mut-vin)))
+(define op-ce2 (daed:simulate-op ckt-ce))
+(daed:stats-bump! "sim_runs")
+(define vc1 (daed:v op-ce2 2))
+(define gain-ok (daed:check-true (and (number? vc1) (< vc1 vc0))))
+(define dvc (if (and (number? vc1) (number? vc0)) (- vc1 vc0) 0.0))
+
+(display "ce-perturb vc(1.20)=")
+(display vc0)
+(display " vc(1.22)=")
+(display vc1)
+(display " dvc=")
+(display dvc)
+(newline)
+
+(define snap (daed:snapshot ckt-ce "pre-bf"))
+(define q (daed:find-comp ckt-ce "q1"))
+(define bf0 (daed:comp-param q "bf" 0.0))
+(define mut-bf (daed:mutate-param! ckt-ce "q1" "bf" 50.0))
+(define mut-bf-ok (daed:check-true (hash-ref mut-bf "ok" #f)))
+(define rst (daed:restore! ckt-ce snap))
+(define rst-ok (daed:check-true rst))
+(define bf1 (daed:comp-param (daed:find-comp ckt-ce "q1") "bf" 0.0))
+(define bf-back (daed:check-approx bf1 bf0 1e-12))
+
+(display "mutate bf ")
+(display bf0)
+(display " -> 50 restore=")
+(display bf1)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and topo-off nl-q
+       off-flag vc-off-ok vb-off-ok
+       on-flag sat-ok vbe-ok
+       ce-ok bias-ok vbe-ce-ok mut-vin-ok gain-ok
+       mut-bf-ok rst-ok bf-back esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: Ebers-Moll BJT switch + CE .op (escapes=0)")
+    (newline)
+    (display "RESULT pass example=08-bjt-ce escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: BJT CE denseness probe")
+    (newline)
+    (display "RESULT fail example=08-bjt-ce")
+    (newline)
+    (display "  off-flag=")
+    (display off-flag)
+    (display " vc-off-ok=")
+    (display vc-off-ok)
+    (display " sat-ok=")
+    (display sat-ok)
+    (display " bias-ok=")
+    (display bias-ok)
+    (display " gain-ok=")
+    (display gain-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

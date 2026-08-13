@@ -1,8 +1,10 @@
-; lib/tran.aura — Fixed-step transient analysis (Phase 2)
+; lib/tran.aura — Fixed-step transient analysis (Phase 2 / 5)
 ;
 ; (require "tran" all:)
 ;
 ; Backward Euler, fixed dt.
+; Nonlinear circuits: BE companions + Newton-Raphson at each step.
+; Linear circuits keep the one-shot companion solve.
 ; nsteps may be integer or float (e.g. from tstop/dt); coerced to exact int.
 ; Initial node voltages and L currents default to 0 (zero-state).
 ; Host: make-vector accepts integer-valued floats (aura#2965); vector-ref
@@ -20,13 +22,16 @@
         daed:tran-times
         daed:tran-series
         daed:tran-v
-        daed:tran-v-at)
+        daed:tran-v-at
+        daed:tran-iters
+        daed:tran-nr-fail)
 
 (require "netlist" all:)
 (require "stamp" all:)
 (require "solve" all:)
+(require "devices" all:)
 
-(define daed:tran-version 1)
+(define daed:tran-version 2)
 
 ; Nearest exact integer (vector indices / make-vector lengths).
 (define (daed:as-int n)
@@ -109,13 +114,44 @@
         (set! node (+ node 1)))))
   #t)
 
+; Seed an MNA vector from the previous-step node voltages.
+(define (daed:state->x state n)
+  (let ((x (make-vector n 0.0))
+        (vvec (hash-ref state "v" (make-vector 1 0.0)))
+        (k 1)
+        (vmax (- (vector-length vvec) 1)))
+    (while (lambda () (and (<= k vmax) (< (- k 1) n)))
+      (lambda ()
+        (daed:vec-set! x (- k 1) (daed:node-voltage vvec k))
+        (set! k (+ k 1))))
+    x))
+
+; One BE + NR time step. Mutates state. Returns nr result hash.
+(define (daed:tran-step-nr! comps dt state)
+  (let ((N (daed:mna-size-tran comps))
+        (n-v (daed:n-voltage-unknowns comps)))
+    (let ((x0 (daed:state->x state N)))
+      (let ((nr (daed:newton-solve
+                  (lambda (x xo)
+                    (daed:stamp-system-nr-tran comps dt state x xo))
+                  x0)))
+        (if (hash-ref nr "ok" #f)
+          (begin
+            (daed:update-state-voltages! state (hash-ref nr "x" x0) n-v)
+            (daed:update-state-iL! comps state dt))
+          0)
+        nr))))
+
 ; Fixed-step .tran: nsteps is non-negative (int or float; coerced via round).
 ; Samples: t=0 plus nsteps ends → length nsteps+1.
 ; Returns hash: ok, dt, tstop, nsteps, times, series, n_v, final
+; Nonlinear: also iters (sum of NR iters) and nr_fail count.
 (define (daed:simulate-tran ckt dt nsteps)
   (let ((comps (daed:ckt-comps ckt))
-        (res (hash)))
+        (res (hash))
+        (nl #f))
     (hash-set! res "dt" dt)
+    (set! nl (daed:has-nonlinear? comps))
     (if (or (not (number? dt)) (not (number? nsteps))
             (<= dt 0.0) (< nsteps 0))
       (begin
@@ -125,6 +161,7 @@
         (hash-set! res "times" (make-vector 0 0.0))
         (hash-set! res "series" (hash))
         (hash-set! res "n_v" 0)
+        (hash-set! res "iters" 0)
         res)
       ; Coerce float step counts to exact int (vector-ref needs integer indices).
       (let ((n-v (daed:n-voltage-unknowns comps))
@@ -134,7 +171,9 @@
               (state (daed:make-tran-state comps))
               (times (make-vector (+ ns 1) 0.0))
               (series (hash))
-              (ok #t))
+              (ok #t)
+              (iters 0)
+              (nr-fail 0))
           (hash-set! res "tstop" tstop)
           (let ((node 1))
             (while (lambda () (<= node n-v))
@@ -148,16 +187,24 @@
             (while (lambda () (and ok (<= k ns)))
               (lambda ()
                 (set! t (+ t dt))
-                (let ((sys (daed:stamp-system-tran comps dt state)))
-                  (let ((N (car sys))
-                        (A (car (cdr sys)))
-                        (b (car (cdr (cdr sys)))))
-                    (if (or (<= N 0) (not (daed:dense-solve! A b N)))
-                      (set! ok #f)
+                (if nl
+                  (let ((nr (daed:tran-step-nr! comps dt state)))
+                    (set! iters (+ iters (hash-ref nr "iters" 0)))
+                    (if (hash-ref nr "ok" #f)
+                      (daed:record-step! series times t n-v state k)
                       (begin
-                        (daed:update-state-voltages! state b n-v)
-                        (daed:update-state-iL! comps state dt)
-                        (daed:record-step! series times t n-v state k)))))
+                        (set! ok #f)
+                        (set! nr-fail (+ nr-fail 1)))))
+                  (let ((sys (daed:stamp-system-tran comps dt state)))
+                    (let ((N (car sys))
+                          (A (car (cdr sys)))
+                          (b (car (cdr (cdr sys)))))
+                      (if (or (<= N 0) (not (daed:dense-solve! A b N)))
+                        (set! ok #f)
+                        (begin
+                          (daed:update-state-voltages! state b n-v)
+                          (daed:update-state-iL! comps state dt)
+                          (daed:record-step! series times t n-v state k))))))
                 (set! k (+ k 1)))))
           (hash-set! res "ok" ok)
           (hash-set! res "nsteps" ns)
@@ -165,6 +212,9 @@
           (hash-set! res "series" series)
           (hash-set! res "n_v" n-v)
           (hash-set! res "final" state)
+          (hash-set! res "iters" iters)
+          (hash-set! res "nr_fail" nr-fail)
+          (hash-set! res "nr" nl)
           res)))))
 
 (define (daed:tran-ok? res)
@@ -199,3 +249,9 @@
       (if (<= n 0)
         0.0
         (vector-ref wv (- n 1))))))
+
+(define (daed:tran-iters res)
+  (hash-ref res "iters" 0))
+
+(define (daed:tran-nr-fail res)
+  (hash-ref res "nr_fail" 0))

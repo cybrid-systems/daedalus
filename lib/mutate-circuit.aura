@@ -14,14 +14,16 @@
         daed:clone-circuit
         daed:topology-ok?
         daed:value-ok?
+        daed:param-ok?
         daed:mutate-value!
+        daed:mutate-param!
         daed:restore-circuit!
         daed:circuit-snapshot
         daed:comp-snapshot-value)
 
 (require "netlist" all:)
 
-(define daed:mutate-version 1)
+(define daed:mutate-version 2)
 
 ; ── Lookup ──
 
@@ -35,12 +37,23 @@
 
 ; ── Clone (semantic snapshot building blocks) ──
 
+(define (daed:copy-model-fields! dst src)
+  (hash-set! dst "n3" (hash-ref src "n3" 0))
+  (hash-set! dst "n" (hash-ref src "n" 1.0))
+  (hash-set! dst "vt" (hash-ref src "vt" 0.026))
+  (hash-set! dst "bf" (hash-ref src "bf" 100.0))
+  (hash-set! dst "br" (hash-ref src "br" 1.0))
+  (hash-set! dst "gmin" (hash-ref src "gmin" 1e-12))
+  dst)
+
 (define (daed:clone-comp c)
-  (daed:comp (daed:comp-type c)
-             (daed:comp-name c)
-             (daed:comp-n1 c)
-             (daed:comp-n2 c)
-             (daed:comp-value c)))
+  (let ((h (daed:comp (daed:comp-type c)
+                      (daed:comp-name c)
+                      (daed:comp-n1 c)
+                      (daed:comp-n2 c)
+                      (daed:comp-value c))))
+    (daed:copy-model-fields! h c)
+    h))
 
 (define (daed:clone-comps cs)
   (if (null? cs)
@@ -75,8 +88,19 @@
 (define (daed:value-ok? type value)
   (if (not (number? value))
     #f
-    (if (or (equal? type "R") (equal? type "C") (equal? type "L"))
+    (if (or (equal? type "R") (equal? type "C") (equal? type "L")
+            (equal? type "D") (equal? type "Q"))
       (> value 0.0)
+      #t)))
+
+; Extra model params (n, vt, bf, br, gmin) must be positive numbers.
+(define (daed:param-ok? key val)
+  (if (not (number? val))
+    #f
+    (if (or (equal? key "n") (equal? key "vt") (equal? key "bf")
+            (equal? key "br") (equal? key "gmin") (equal? key "value")
+            (equal? key "Is") (equal? key "is"))
+      (> val 0.0)
       #t)))
 
 (define (daed:name-seen? name seen)
@@ -99,6 +123,7 @@
                   (type (daed:comp-type c))
                   (n1 (daed:comp-n1 c))
                   (n2 (daed:comp-n2 c))
+                  (n3 (daed:comp-n3 c))
                   (val (daed:comp-value c)))
               (if (or (not (string? name))
                       (equal? name "")
@@ -106,6 +131,7 @@
                       (not (string? type))
                       (not (daed:node-ok? n1))
                       (not (daed:node-ok? n2))
+                      (and (equal? type "Q") (not (daed:node-ok? n3)))
                       (not (daed:value-ok? type val)))
                 #f
                 (loop (cdr rest) (cons name seen))))))))))
@@ -152,6 +178,44 @@
                     (hash-set! res "reason" "topology-after")
                     res))))))))))
 
+; Mutate a named model parameter (e.g. "bf", "n", "vt"). "value"/"Is" → Is.
+(define (daed:mutate-param! ckt name key new-value)
+  (let ((res (hash))
+        (k key))
+    (hash-set! res "name" name)
+    (hash-set! res "key" key)
+    (hash-set! res "new" new-value)
+    (if (or (equal? k "Is") (equal? k "is"))
+      (set! k "value")
+      0)
+    (if (equal? k "value")
+      (daed:mutate-value! ckt name new-value)
+      (if (not (daed:topology-ok? ckt))
+        (begin
+          (hash-set! res "ok" #f)
+          (hash-set! res "reason" "topology")
+          (hash-set! res "old" 0)
+          res)
+        (let ((c (daed:find-comp ckt name)))
+          (if (not c)
+            (begin
+              (hash-set! res "ok" #f)
+              (hash-set! res "reason" "not-found")
+              (hash-set! res "old" 0)
+              res)
+            (let ((old (hash-ref c k 0)))
+              (hash-set! res "old" old)
+              (if (not (daed:param-ok? k new-value))
+                (begin
+                  (hash-set! res "ok" #f)
+                  (hash-set! res "reason" "bad-value")
+                  res)
+                (begin
+                  (hash-set! c k new-value)
+                  (hash-set! res "ok" #t)
+                  (hash-set! res "reason" "applied")
+                  res)))))))))
+
 ; Copy snap fields onto live circuit components (same ckt object identity).
 (define (daed:restore-circuit! ckt snap)
   (if (not snap)
@@ -170,7 +234,8 @@
                       (hash-set! c "type" (daed:comp-type sc))
                       (hash-set! c "n1" (daed:comp-n1 sc))
                       (hash-set! c "n2" (daed:comp-n2 sc))
-                      (hash-set! c "value" (daed:comp-value sc)))
+                      (hash-set! c "value" (daed:comp-value sc))
+                      (daed:copy-model-fields! c sc))
                     0)))
               (loop (cdr live)))))))))
 

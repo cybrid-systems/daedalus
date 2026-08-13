@@ -38,6 +38,11 @@ No leave from \(V_A\). `circuit->html` / `apply-viz-edits!` are pure Aura string
 safe mutate. Browser edit-back uses exported JSON/form; live HTTP/postMessage transport
 is optional product glue, not denseness core.
 
+## Phase 5 / issue #2 (nonlinear)
+
+No leave from \(V_A\). Shockley diode, Ebers-Moll NPN, dense Newton-Raphson (with
+`pnjlim` + gmin), and BE+NR `.tran` are pure Aura on the existing dense GE kernel.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

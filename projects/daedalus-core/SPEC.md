@@ -68,7 +68,11 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Fixed-step `.tran` (C/L BE companions, `tran.aura`, denseness probe 02)
 - [x] Safe parameter mutate + dual snapshot/rollback (`mutate-circuit.aura`, probe 03)
 - [x] Agent closed-loop auto-tune (`agent.aura`, probe 05)
+- [x] Nonlinear devices + Newton-Raphson (Shockley D, Ebers-Moll Q, probes 07–09; issue #2)
 - [x] denseness probe 01
 - [x] denseness probe 02
 - [x] denseness probe 03
 - [x] denseness probe 05
+- [x] denseness probe 07 (diode `.op`)
+- [x] denseness probe 08 (BJT switch + CE `.op`)
+- [x] denseness probe 09 (diode clamp + BJT switch `.tran`)

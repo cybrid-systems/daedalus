@@ -150,7 +150,12 @@ Daedalus is better at teaching students how to **understand and reshape circuits
 - Snapshot / rollback preserves both semantic state and denseness metrics
 - At least three denseness probes pass
 
-**Non-goals (P0)**  
+**P1 / Phase 5** ([issue #2](https://github.com/cybrid-systems/daedalus/issues/2))
+- Shockley diode and Ebers-Moll NPN (educational-grade, FlatAST-mutable)
+- Dense Newton-Raphson `.op` and BE+NR `.tran`
+- Linear probes unchanged (one-shot path when no D/Q)
+
+**Non-goals (P0 / P1)**  
 Full BSIM, commercial-grade sparse solvers, schematic capture UI, mixed-signal co-simulation.
 
 ## Layout
@@ -206,6 +211,14 @@ Bidirectional netlist ↔ HTML visualization ([issue #1](https://github.com/cybr
 ```bash
 ./scripts/run-aura.sh examples/06-viz-bidirectional/main.aura
 # open examples/06-viz-bidirectional/out/*.html in a browser
+```
+
+Phase 5 nonlinear devices + Newton-Raphson ([issue #2](https://github.com/cybrid-systems/daedalus/issues/2)):
+
+```bash
+./scripts/run-aura.sh examples/07-diode-op/main.aura
+./scripts/run-aura.sh examples/08-bjt-ce/main.aura
+./scripts/run-aura.sh examples/09-diode-clamp-tran/main.aura
 ```
 
 ## Relation to Unify

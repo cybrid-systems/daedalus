@@ -1,8 +1,10 @@
-; lib/solve.aura — Dense linear solve + .op entry (Phase 1)
+; lib/solve.aura — Dense linear solve + Newton-Raphson .op (Phase 1 / 5)
 ;
 ; (require "solve" all:)
 ;
 ; Gaussian elimination with partial pivoting on dense MNA.
+; Nonlinear circuits use NR (Jacobian + residual) on the same GE kernel.
+; Linear circuits keep the one-shot path (bit-stable vs Phase 1 probes).
 ; Pure Aura; no FFI (escape count 0 on this path).
 ;
 ; Post aura#2940: plain (/) is correct on small post-arithmetic floats.
@@ -10,18 +12,31 @@
 
 (export daed:solve-version
         daed:dense-solve!
+        daed:newton-solve
         daed:simulate-op
         daed:op-ok?
         daed:op-x
         daed:op-n
         daed:op-n-v
-        daed:op-voltages)
+        daed:op-voltages
+        daed:op-iters
+        daed:op-residual
+        daed:nr-maxiter
+        daed:nr-atol
+        daed:nr-vtol
+        daed:nr-dvmax)
 
 (require "netlist" all:)
 (require "stamp" all:)
+(require "devices" all:)
 
-; 2 = post-#2940/#2941 cleanup (native / + sci literals; no safe-div)
-(define daed:solve-version 2)
+; 3 = Phase 5 Newton-Raphson for D/Q
+(define daed:solve-version 3)
+
+(define daed:nr-maxiter 50)
+(define daed:nr-atol 1e-8)
+(define daed:nr-vtol 1e-6)
+(define daed:nr-dvmax 0.5)
 
 ; Pivot / singularity floor for dense GE
 (define daed:ge-eps 1e-12)
@@ -105,44 +120,143 @@
               (set! i (- i 1)))))
         ok))))
 
+; Pack node voltages from x into a "volts" hash.
+(define (daed:volts-from-x x n-v)
+  (let ((volts (hash)))
+    (hash-set! volts "0" 0.0)
+    (let ((k 1))
+      (while (lambda () (<= k n-v))
+        (lambda ()
+          (hash-set! volts
+                     (number->string k)
+                     (daed:x-v x k))
+          (set! k (+ k 1)))))
+    volts))
+
+; Newton-Raphson on a stamp thunk: (stamp-fn x x-old) → (list N J F n-v)
+; Returns hash: ok, x, n, n_v, iters, residual, reason
+(define (daed:newton-solve stamp-fn x0)
+  (let ((res (hash))
+        (x (if x0 (daed:copy-vec x0) (make-vector 0 0.0)))
+        (x-old #f)
+        (ok #f)
+        (iters 0)
+        (resid 1e300)
+        (reason "init")
+        (going #t))
+    (set! x-old (daed:copy-vec x))
+    (while (lambda () (and going (< iters daed:nr-maxiter)))
+      (lambda ()
+        (set! iters (+ iters 1))
+        (let ((sys (stamp-fn x x-old)))
+          (let ((N (car sys))
+                (J (car (cdr sys)))
+                (F (car (cdr (cdr sys))))
+                (n-v (car (cdr (cdr (cdr sys))))))
+            (hash-set! res "n" N)
+            (hash-set! res "n_v" n-v)
+            (if (<= N 0)
+              (begin
+                (set! going #f)
+                (set! reason "empty"))
+              (begin
+                (set! resid (daed:vec-norm-inf F N))
+                (let ((rhs (make-vector N 0.0))
+                      (i 0))
+                  (while (lambda () (< i N))
+                    (lambda ()
+                      (daed:vec-set! rhs i (* -1.0 (daed:vec-ref F i)))
+                      (set! i (+ i 1))))
+                  (if (not (daed:dense-solve! J rhs N))
+                    (begin
+                      (set! going #f)
+                      (set! reason "singular"))
+                    (begin
+                      (daed:limit-dx! rhs n-v daed:nr-dvmax)
+                      (let ((dxn (daed:vec-norm-inf rhs n-v)))
+                        (set! x-old (daed:copy-vec x))
+                        (if (< (vector-length x) N)
+                          (let ((nx (make-vector N 0.0))
+                                (k 0)
+                                (m (vector-length x)))
+                            (while (lambda () (< k m))
+                              (lambda ()
+                                (vector-set! nx k (vector-ref x k))
+                                (set! k (+ k 1))))
+                            (set! x nx))
+                          0)
+                        (daed:vec-add-scaled! x rhs N 1.0)
+                        (if (or (< resid daed:nr-atol) (< dxn daed:nr-vtol))
+                          (begin
+                            (set! ok #t)
+                            (set! going #f)
+                            (set! reason "converged"))
+                          0)))))))))))
+    (if (and (not ok) (< resid (* 10.0 daed:nr-atol)))
+      (begin
+        (set! ok #t)
+        (set! reason "relaxed"))
+      0)
+    (if (and (not ok) (equal? reason "init"))
+      (set! reason "maxiter")
+      0)
+    (hash-set! res "ok" ok)
+    (hash-set! res "x" x)
+    (hash-set! res "iters" iters)
+    (hash-set! res "residual" resid)
+    (hash-set! res "reason" reason)
+    (hash-set! res "nr" #t)
+    res))
+
 ; Result hash:
 ;   ok     → boolean
 ;   n      → system size
 ;   n_v    → number of voltage unknowns
 ;   x      → solution vector (node voltages then branch currents)
 ;   volts  → hash "1"→v1, "2"→v2, … (string keys for node ids); "0"→0.0
+;   iters / residual / nr  → Newton stats (linear path: iters=1, nr=#f)
 (define (daed:simulate-op ckt)
   (let ((comps (daed:ckt-comps ckt)))
-    (let ((sys (daed:stamp-system comps)))
-      (let ((N (car sys))
-            (A (car (cdr sys)))
-            (b (car (cdr (cdr sys))))
-            (n-v (car (cdr (cdr (cdr sys))))))
-        (let ((res (hash)))
-          (hash-set! res "n" N)
-          (hash-set! res "n_v" n-v)
-          (if (<= N 0)
-            (begin
-              (hash-set! res "ok" #f)
-              (hash-set! res "x" (make-vector 0 0.0))
-              (hash-set! res "volts" (hash))
-              res)
-            (let ((ok (daed:dense-solve! A b N)))
-              (hash-set! res "ok" ok)
-              (hash-set! res "x" b)
-              (let ((volts (hash)))
-                (hash-set! volts "0" 0.0)
-                (if ok
-                  (let ((k 1))
-                    (while (lambda () (<= k n-v))
-                      (lambda ()
-                        (hash-set! volts
-                                   (number->string k)
-                                   (daed:vec-ref b (- k 1)))
-                        (set! k (+ k 1)))))
-                  0)
-                (hash-set! res "volts" volts)
-                res))))))))
+    (if (daed:has-nonlinear? comps)
+      (daed:simulate-op-nr comps)
+      (daed:simulate-op-lin comps))))
+
+(define (daed:simulate-op-lin comps)
+  (let ((sys (daed:stamp-system comps)))
+    (let ((N (car sys))
+          (A (car (cdr sys)))
+          (b (car (cdr (cdr sys))))
+          (n-v (car (cdr (cdr (cdr sys))))))
+      (let ((res (hash)))
+        (hash-set! res "n" N)
+        (hash-set! res "n_v" n-v)
+        (hash-set! res "iters" 1)
+        (hash-set! res "residual" 0.0)
+        (hash-set! res "nr" #f)
+        (hash-set! res "reason" "linear")
+        (if (<= N 0)
+          (begin
+            (hash-set! res "ok" #f)
+            (hash-set! res "x" (make-vector 0 0.0))
+            (hash-set! res "volts" (hash))
+            res)
+          (let ((ok (daed:dense-solve! A b N)))
+            (hash-set! res "ok" ok)
+            (hash-set! res "x" b)
+            (hash-set! res "volts" (if ok (daed:volts-from-x b n-v) (hash)))
+            res))))))
+
+(define (daed:simulate-op-nr comps)
+  (let ((N (daed:mna-size comps)))
+    (let ((nr (daed:newton-solve
+                (lambda (x xo) (daed:stamp-system-nr comps x xo))
+                (make-vector N 0.0))))
+      (hash-set! nr "volts"
+        (if (hash-ref nr "ok" #f)
+          (daed:volts-from-x (hash-ref nr "x" (make-vector 0 0.0))
+                             (hash-ref nr "n_v" 0))
+          (hash)))
+      nr)))
 
 (define (daed:op-ok? res)
   (hash-ref res "ok" #f))
@@ -158,3 +272,9 @@
 
 (define (daed:op-voltages res)
   (hash-ref res "volts" (hash)))
+
+(define (daed:op-iters res)
+  (hash-ref res "iters" 0))
+
+(define (daed:op-residual res)
+  (hash-ref res "residual" 0.0))

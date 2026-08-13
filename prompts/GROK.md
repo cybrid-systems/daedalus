@@ -31,17 +31,20 @@ Primary objects under test:
 
 ## Current Status
 
-**Phase 0–4 landed (P0 denseness slice):**
+**Phase 0–5 landed (P0 slice + educational nonlinear):**
 - Scaffolding: scripts, denseness notes, `00-smoke`
-- Circuit kernel: `netlist` / `stamp` / `solve` / `tran` / `probe` / `mutate-circuit` / `agent` (`daed:min-version=4`)
+- Circuit kernel: `netlist` / `stamp` / `devices` / `solve` / `tran` / `probe` / `mutate-circuit` / `agent` (`daed:min-version=5`)
 - Probe `01-voltage-divider` — linear `.op`, \(v_2=10/3\), escapes=0
 - Probe `02-rc-lowpass` — `.op` + fixed-step BE `.tran`, analytic RC checks, escapes=0
 - Probe `03-mutate-resistor` — safe `daed:mutate!` + dual `daed:snapshot`/`restore!`, escapes=0
 - Probe `05-agent-autotune` — O→D→M→V→R auto-tune to \(v_2=2.5\), escapes=0
 - Probe `06-viz-bidirectional` — netlist ↔ HTML (issue #1 P0–P2), escapes=0
+- Probe `07-diode-op` — Shockley + NR `.op`, escapes=0 (issue #2)
+- Probe `08-bjt-ce` — Ebers-Moll switch + CE `.op`, escapes=0 (issue #2)
+- Probe `09-diode-clamp-tran` — BE+NR nonlinear `.tran`, escapes=0 (issue #2)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 
-**Post-P0:** topology mutate, multi-agent compose, nonlinear devices, richer viz layout (as needed).
+**Post-P1:** topology mutate, multi-agent compose, PNP / astable coverage, richer viz layout (as needed).
 
 ## When generating or reviewing code
 

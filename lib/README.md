@@ -4,19 +4,20 @@
 
 | Module | Phase | Role |
 |--------|-------|------|
-| `daedalus-min.aura` | 0–4 | Facade: version + metrology + re-exports (`daed:*`) |
-| `netlist.aura` | 1–2 | Circuit ADT (`R`/`C`/`L`/`V`/`I`; node 0 = GND) |
+| `daedalus-min.aura` | 0–5 | Facade: version + metrology + re-exports (`daed:*`) |
+| `netlist.aura` | 1–5 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`; node 0 = GND) |
 | `stamp.aura` | 1–2 | MNA stamp: DC + BE companions for `.tran` |
-| `solve.aura` | 1 | Dense GE + `daed:simulate-op` |
-| `tran.aura` | 2 | Fixed-step Backward Euler `.tran` |
+| `devices.aura` | 5 | Shockley diode + Ebers-Moll NPN + NR residual/Jacobian |
+| `solve.aura` | 1 / 5 | Dense GE + linear `.op` + Newton-Raphson `.op` |
+| `tran.aura` | 2 / 5 | Fixed-step BE `.tran`; NR per step when D/Q present |
 | `probe.aura` | 1–2 | Node voltage / series query |
-| `mutate-circuit.aura` | 3 | Safe parameter mutate + circuit snapshot |
+| `mutate-circuit.aura` | 3–5 | Safe parameter mutate + circuit snapshot (incl. D/Q params) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
 
 ```scheme
 (require "daedalus-min" all:)
-; daed:min-version => 4
+; daed:min-version => 5
 
 (define ckt
   (daed:circuit "divider"
@@ -33,6 +34,16 @@
 (define op (daed:simulate-op ckt))
 (write-file "out.html" (daed:circuit->html ckt op))
 (daed:apply-viz-edits! ckt (list (list "r2" 1e3)))
+
+;; Phase 5: Shockley diode + Ebers-Moll NPN (Newton-Raphson .op)
+(define dckt
+  (daed:circuit "diode"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:D "d1" 2 0))))
+(define dop (daed:simulate-op dckt))
+(daed:v dop 2)   ; ≈ 0.7 V
+(daed:op-iters dop)
 ```
 
 Host resolution: `scripts/run-aura.sh` sets `AURA_PATH` to `../aura-grok/lib:./lib`.

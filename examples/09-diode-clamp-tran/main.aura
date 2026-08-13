@@ -1,0 +1,166 @@
+; examples/09-diode-clamp-tran/main.aura
+;
+; Phase 5 denseness probe — nonlinear fixed-step .tran (BE + NR).
+; RC low-pass with shunt Shockley diode: step response clamps near Vd
+; instead of charging to Vin.
+;
+;   vin ── R ── n2 ── C ── GND
+;                └── D ── GND
+;
+; Also: BJT inverter .tran from zero-state settles with collector low
+; (clear startup of a nonlinear transient).
+;
+; Axes: BE companion + NR per step + diode/BJT + metrology
+; Escapes on core path: 0
+;
+; Binding note: prefer top-level / let* over internal define.
+;
+; Run: ./scripts/run-aura.sh examples/09-diode-clamp-tran/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 09-diode-clamp-tran: BE+NR nonlinear .tran ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " devices=")
+(display daed:devices-version)
+(display " tran=")
+(display daed:tran-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define Rval 1e3)
+(define Cval 1e-6)
+(define Vin 5.0)
+(define tau (* Rval Cval))
+
+(define ckt
+  (daed:circuit "diode-clamp"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval)
+          (daed:D "d1" 2 0))))
+
+(define topo (daed:check-true (daed:topology-ok? ckt)))
+(define nl (daed:check-true (daed:has-nonlinear? (daed:ckt-comps ckt))))
+
+(define op (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+
+(define op-ok-flag (daed:op-ok? op))
+(define v2-op (daed:v op 2))
+(define op-flag (daed:check-true op-ok-flag))
+(define op-vd-ok (daed:check-true (and (number? v2-op) (> v2-op 0.55) (< v2-op 0.85))))
+
+(display ".op ok=")
+(display op-ok-flag)
+(display " v2=")
+(display v2-op)
+(display " iters=")
+(display (daed:op-iters op))
+(newline)
+
+(define dt (/ tau 50.0))
+(define tstop (* 5.0 tau))
+(define nsteps (daed:nsteps-for tstop dt))
+(define tr (daed:simulate-tran ckt dt nsteps))
+(daed:stats-bump! "sim_runs")
+
+(define tr-ok-flag (daed:tran-ok? tr))
+(define got-steps (daed:tran-nsteps tr))
+(define tr-flag (daed:check-true tr-ok-flag))
+(define steps-ok (daed:check-eq got-steps 250))
+(define v0 (daed:tran-v-at tr 2 0))
+(define ic-ok (daed:check-approx v0 0.0 1e-9))
+(define v-end (daed:tran-v tr 2))
+(define end-ok (daed:check-true (and (number? v-end) (> v-end 0.50) (< v-end 0.90))))
+(define clamped-ok (daed:check-true (and (number? v-end) (< v-end 1.5))))
+(define nr-fail (daed:tran-nr-fail tr))
+(define nr-ok (daed:check-eq nr-fail 0))
+
+(display ".tran ok=")
+(display tr-ok-flag)
+(display " nsteps=")
+(display got-steps)
+(display " v2(0)=")
+(display v0)
+(display " v2(5tau)=")
+(display v-end)
+(display " nr-iters=")
+(display (daed:tran-iters tr))
+(display " nr-fail=")
+(display nr-fail)
+(newline)
+
+; BJT inverter .tran: zero-state startup to saturated collector
+(define ckt-q
+  (daed:circuit "q-switch-tran"
+    (list (daed:V "vcc" 1 0 5.0)
+          (daed:R "rc" 1 2 1e3)
+          (daed:C "cl" 2 0 1e-6)
+          (daed:V "vin" 4 0 5.0)
+          (daed:R "rb" 4 3 10e3)
+          (daed:Q "q1" 2 3 0))))
+
+(define dtq 2e-5)
+(define nsq (daed:nsteps-for 2e-3 dtq))
+(define trq (daed:simulate-tran ckt-q dtq nsq))
+(daed:stats-bump! "sim_runs")
+(define q-ok (daed:check-true (daed:tran-ok? trq)))
+(define vc0 (daed:tran-v-at trq 2 0))
+(define vc-end (daed:tran-v trq 2))
+(define q-ic-ok (daed:check-approx vc0 0.0 1e-9))
+(define q-sat-ok (daed:check-true (and (number? vc-end) (< vc-end 0.5))))
+
+(display "bjt-tran ok=")
+(display (daed:tran-ok? trq))
+(display " vc(0)=")
+(display vc0)
+(display " vc(end)=")
+(display vc-end)
+(display " nr-iters=")
+(display (daed:tran-iters trq))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and topo nl
+       op-flag op-vd-ok
+       tr-flag steps-ok ic-ok end-ok clamped-ok nr-ok
+       q-ok q-ic-ok q-sat-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 3)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: diode clamp + BJT switch .tran BE+NR (escapes=0)")
+    (newline)
+    (display "RESULT pass example=09-diode-clamp-tran escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: nonlinear .tran denseness probe")
+    (newline)
+    (display "RESULT fail example=09-diode-clamp-tran")
+    (newline)
+    (display "  op-flag=")
+    (display op-flag)
+    (display " tr-flag=")
+    (display tr-flag)
+    (display " end-ok=")
+    (display end-ok)
+    (display " clamped-ok=")
+    (display clamped-ok)
+    (display " q-sat-ok=")
+    (display q-sat-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

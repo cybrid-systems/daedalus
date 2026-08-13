@@ -1,0 +1,165 @@
+; examples/07-diode-op/main.aura
+;
+; Phase 5 denseness probe — Shockley diode + Newton-Raphson .op.
+; Series D + R + DC: forward drop ~0.7 V; reverse current ~0.
+;
+;   forward:  vin ── R ── n2 ── D(anode) → GND
+;   reverse:  vin ── R ── n2 ── D(cathode); anode = GND
+;
+; Axes: nonlinear device + NR kernel + mutate/rollback + metrology
+; Escapes on core path: 0
+;
+; Binding note: prefer top-level / let* over internal define
+; (host internal-define behaves like simultaneous letrec).
+;
+; Run: ./scripts/run-aura.sh examples/07-diode-op/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 07-diode-op: Shockley + NR .op denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " devices=")
+(display daed:devices-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define Vin 5.0)
+(define Rval 1e3)
+
+(define ckt-f
+  (daed:circuit "diode-fwd"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:D "d1" 2 0))))
+
+(define topo-f (daed:check-true (daed:topology-ok? ckt-f)))
+(define nl-f (daed:check-true (daed:has-nonlinear? (daed:ckt-comps ckt-f))))
+
+(define op-f (daed:simulate-op ckt-f))
+(daed:stats-bump! "sim_runs")
+
+(define ok-f (daed:op-ok? op-f))
+(define v1 (daed:v op-f 1))
+(define vd (daed:v op-f 2))
+(define id (/ (- Vin vd) Rval))
+(define iters (daed:op-iters op-f))
+(define resid (daed:op-residual op-f))
+(define ok-flag (daed:check-true ok-f))
+(define v1-ok (daed:check-approx v1 Vin 1e-4))
+(define vd-lo (daed:check-true (and (number? vd) (> vd 0.55))))
+(define vd-hi (daed:check-true (and (number? vd) (< vd 0.85))))
+(define id-ok (daed:check-true (and (number? id) (> id 0.003) (< id 0.005))))
+(define iters-ok (daed:check-true (and (number? iters) (> iters 0) (< iters 50))))
+(define resid-ok (daed:check-true (and (number? resid) (< resid 1e-6))))
+
+(display "forward ok=")
+(display ok-f)
+(display " v1=")
+(display v1)
+(display " vd=")
+(display vd)
+(display " id=")
+(display id)
+(display " iters=")
+(display iters)
+(display " residual=")
+(display resid)
+(newline)
+
+(define ckt-r
+  (daed:circuit "diode-rev"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:D "d1" 0 2))))
+
+(define op-r (daed:simulate-op ckt-r))
+(daed:stats-bump! "sim_runs")
+
+(define ok-r (daed:op-ok? op-r))
+(define vc (daed:v op-r 2))
+(define ir (/ (- Vin vc) Rval))
+(define ok-r-flag (daed:check-true ok-r))
+(define vc-ok (daed:check-approx vc Vin 1e-3))
+(define ir-ok (daed:check-true (and (number? ir) (< (abs ir) 1e-8))))
+
+(display "reverse ok=")
+(display ok-r)
+(display " vc=")
+(display vc)
+(display " ir=")
+(display ir)
+(newline)
+
+(define snap (daed:snapshot ckt-f "pre-is"))
+(define is0 (daed:comp-value (daed:find-comp ckt-f "d1")))
+(define mut (daed:mutate! ckt-f "d1" 1e-10))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define op-m (daed:simulate-op ckt-f))
+(daed:stats-bump! "sim_runs")
+(define vd-m (daed:v op-m 2))
+(define vd-drop (daed:check-true (and (number? vd-m) (< vd-m vd))))
+(define rst (daed:restore! ckt-f snap))
+(define rst-ok (daed:check-true rst))
+(define is1 (daed:comp-value (daed:find-comp ckt-f "d1")))
+(define is-back (daed:check-approx is1 is0 1e-30))
+
+(display "mutate Is ")
+(display is0)
+(display " -> ")
+(display (daed:mutate-new mut))
+(display " vd=")
+(display vd-m)
+(display " restore Is=")
+(display is1)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and topo-f nl-f
+       ok-flag v1-ok vd-lo vd-hi id-ok iters-ok resid-ok
+       ok-r-flag vc-ok ir-ok
+       mut-ok vd-drop rst-ok is-back esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 2)
+       (>= (daed:stats-ref "rollbacks") 1)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: Shockley diode .op + mutate/rollback (escapes=0)")
+    (newline)
+    (display "RESULT pass example=07-diode-op escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: diode .op denseness probe")
+    (newline)
+    (display "RESULT fail example=07-diode-op")
+    (newline)
+    (display "  ok-flag=")
+    (display ok-flag)
+    (display " vd-lo=")
+    (display vd-lo)
+    (display " vd-hi=")
+    (display vd-hi)
+    (display " id-ok=")
+    (display id-ok)
+    (display " vc-ok=")
+    (display vc-ok)
+    (display " ir-ok=")
+    (display ir-ok)
+    (display " vd-drop=")
+    (display vd-drop)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

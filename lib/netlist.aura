@@ -1,9 +1,9 @@
-; lib/netlist.aura — Circuit / Node / Component ADT (Phase 1–2)
+; lib/netlist.aura — Circuit / Node / Component ADT (Phase 1–5)
 ;
 ; (require "netlist" all:)
 ;
 ; FlatAST-friendly hashes + component lists. Node 0 is GND.
-; Components: R, C, L, independent V / I.
+; Components: R, C, L, independent V / I, diode D, BJT Q (NPN).
 
 (export daed:netlist-version
         daed:comp
@@ -12,6 +12,10 @@
         daed:L
         daed:V
         daed:I
+        daed:D
+        daed:D*
+        daed:Q
+        daed:Q*
         daed:circuit
         daed:ckt-name
         daed:ckt-comps
@@ -19,21 +23,39 @@
         daed:comp-name
         daed:comp-n1
         daed:comp-n2
+        daed:comp-n3
+        daed:comp-nc
+        daed:comp-nb
+        daed:comp-ne
         daed:comp-value
         daed:comp-set-value!
+        daed:comp-param
+        daed:comp-set-param!
+        daed:has-nonlinear?
         daed:max-node
         daed:count-type
         daed:node-index
         daed:n-voltage-unknowns
         daed:node-voltage
-        daed:set-node-voltage!)
+        daed:set-node-voltage!
+        daed:x-v)
 
-(define daed:netlist-version 2)
+(define daed:netlist-version 3)
+
+; Default Shockley / Ebers-Moll parameters (educational Si).
+(define daed:default-is 1e-14)
+(define daed:default-n 1.0)
+(define daed:default-vt 0.026)
+(define daed:default-bf 100.0)
+(define daed:default-br 1.0)
+(define daed:default-gmin 1e-12)
+(define daed:default-q-is 1e-15)
 
 ; ── Component constructors ──
-; type: "R" | "C" | "L" | "V" | "I"
+; type: "R" | "C" | "L" | "V" | "I" | "D" | "Q"
 ; n1, n2: integer node ids (0 = GND)
-; value: ohms | farads | henries | volts | amps
+; Q uses n3 = emitter; n1 = collector, n2 = base
+; value: ohms | farads | henries | volts | amps | Is (D/Q)
 
 (define (daed:comp type name n1 n2 value)
   (let ((h (hash)))
@@ -59,6 +81,30 @@
 (define (daed:I name n1 n2 value)
   (daed:comp "I" name n1 n2 value))
 
+; Diode: n1 = anode, n2 = cathode. value = Is.
+(define (daed:D* name anode cathode is n vt)
+  (let ((h (daed:comp "D" name anode cathode is)))
+    (hash-set! h "n" n)
+    (hash-set! h "vt" vt)
+    (hash-set! h "gmin" daed:default-gmin)
+    h))
+
+(define (daed:D name anode cathode)
+  (daed:D* name anode cathode daed:default-is daed:default-n daed:default-vt))
+
+; NPN BJT: n1 = collector, n2 = base, n3 = emitter. value = Is.
+(define (daed:Q* name nc nb ne is bf br vt)
+  (let ((h (daed:comp "Q" name nc nb is)))
+    (hash-set! h "n3" ne)
+    (hash-set! h "bf" bf)
+    (hash-set! h "br" br)
+    (hash-set! h "vt" vt)
+    (hash-set! h "gmin" daed:default-gmin)
+    h))
+
+(define (daed:Q name nc nb ne)
+  (daed:Q* name nc nb ne daed:default-q-is daed:default-bf daed:default-br daed:default-vt))
+
 (define (daed:circuit name comps)
   (let ((h (hash)))
     (hash-set! h "name" name)
@@ -83,6 +129,18 @@
 (define (daed:comp-n2 c)
   (hash-ref c "n2" 0))
 
+(define (daed:comp-n3 c)
+  (hash-ref c "n3" 0))
+
+(define (daed:comp-nc c)
+  (daed:comp-n1 c))
+
+(define (daed:comp-nb c)
+  (daed:comp-n2 c))
+
+(define (daed:comp-ne c)
+  (daed:comp-n3 c))
+
 (define (daed:comp-value c)
   (hash-ref c "value" 0))
 
@@ -90,7 +148,18 @@
   (hash-set! c "value" value)
   c)
 
-; Highest node id appearing in the netlist.
+(define (daed:comp-param c key default)
+  (hash-ref c key default))
+
+(define (daed:comp-set-param! c key val)
+  (hash-set! c key val)
+  c)
+
+(define (daed:has-nonlinear? comps)
+  (or (> (daed:count-type comps "D") 0)
+      (> (daed:count-type comps "Q") 0)))
+
+; Highest node id appearing in the netlist (includes BJT emitter).
 (define (daed:max-node comps)
   (let ((m 0))
     (let loop ((cs comps))
@@ -99,9 +168,11 @@
         (begin
           (let ((c (car cs)))
             (let ((n1 (daed:comp-n1 c))
-                  (n2 (daed:comp-n2 c)))
+                  (n2 (daed:comp-n2 c))
+                  (n3 (daed:comp-n3 c)))
               (if (and (number? n1) (> n1 m)) (set! m n1) 0)
-              (if (and (number? n2) (> n2 m)) (set! m n2) 0)))
+              (if (and (number? n2) (> n2 m)) (set! m n2) 0)
+              (if (and (number? n3) (> n3 m)) (set! m n3) 0)))
           (loop (cdr cs)))))))
 
 (define (daed:count-type comps type)
@@ -138,3 +209,12 @@
     (vector-set! vvec node val)
     0)
   vvec)
+
+; Node voltage from an MNA unknown vector x (index = node-1). Node 0 → 0.
+(define (daed:x-v x node)
+  (if (or (not (number? node)) (<= node 0) (not x))
+    0.0
+    (let ((i (daed:node-index node)))
+      (if (or (< i 0) (>= i (vector-length x)))
+        0.0
+        (vector-ref x i)))))

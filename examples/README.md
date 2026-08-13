@@ -20,6 +20,9 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 03 | [mutate-resistor](03-mutate-resistor/) | safe mutate + dual rollback | **PASS** (Phase 3) |
 | 05 | [agent-autotune](05-agent-autotune/) | O→D→M→V→R | **PASS** (Phase 4) |
 | 06 | [viz-bidirectional](06-viz-bidirectional/) | netlist ↔ HTML | **PASS** (issue #1) |
+| 07 | [diode-op](07-diode-op/) | Shockley + NR `.op` | **PASS** (Phase 5 / issue #2) |
+| 08 | [bjt-ce](08-bjt-ce/) | Ebers-Moll CE / switch `.op` | **PASS** (Phase 5 / issue #2) |
+| 09 | [diode-clamp-tran](09-diode-clamp-tran/) | BE+NR nonlinear `.tran` | **PASS** (Phase 5 / issue #2) |
 
 ## Phase map
 
@@ -31,3 +34,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **3** | 03 | Parameter mutate + dual snapshot/rollback |
 | **4** | 05 | Agent closed-loop denseness |
 | **viz** | 06 | Bidirectional netlist ↔ HTML (issue #1) |
+| **5** | 07–09 | Shockley diode, Ebers-Moll NPN, Newton-Raphson (issue #2) |

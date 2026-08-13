@@ -11,6 +11,9 @@ PROBES=(
   03-mutate-resistor
   05-agent-autotune
   06-viz-bidirectional
+  07-diode-op
+  08-bjt-ce
+  09-diode-clamp-tran
 )
 
 pass=0

@@ -1,8 +1,8 @@
 # Denseness Report — Daedalus
 
-**Date:** 2026-08-12  
-**Status:** **Phase 4 agent closed loop** — probes **00–03, 05** PASS; pure-Aura MNA + BE + mutate + O→D→M→V→R, core \(E=0\).  
-**Judgment:** **partial → strong on P0 slice** — linear DC, fixed-step transient, parameter mutate, and agent auto-tune denseness hold on the evolvable core. Full multi-agent / topology-search product claim remains out of P0.
+**Date:** 2026-08-13  
+**Status:** **Phase 5 nonlinear + NR** — probes **00–03, 05–09** PASS; pure-Aura MNA + BE + mutate + O→D→M→V→R + Shockley/Ebers-Moll NR, core \(E=0\).  
+**Judgment:** **strong on P0 slice + educational nonlinear** — linear DC/tran, parameter mutate, agent auto-tune, and diode/BJT Newton denseness hold on the evolvable core. Full multi-agent / topology-search / commercial models remain out of scope.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
 **Prior spans:** Aether / Hephaestus / Hermes / Prometheus denseness reports (siblings)
@@ -39,6 +39,9 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [03](../examples/03-mutate-resistor/) | mutate + dual rollback | **PASS** | 0 | 0 |
 | [05](../examples/05-agent-autotune/) | O→D→M→V→R | **PASS** | 0 | 0 |
 | [06](../examples/06-viz-bidirectional/) | netlist ↔ HTML (issue #1) | **PASS** | 0 | 0 |
+| [07](../examples/07-diode-op/) | Shockley + NR `.op` | **PASS** | 0 | 0 |
+| [08](../examples/08-bjt-ce/) | Ebers-Moll CE / switch | **PASS** | 0 | 0 |
+| [09](../examples/09-diode-clamp-tran/) | BE+NR nonlinear `.tran` | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -55,18 +58,26 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Compose **pattern** with Aether (O→D→M→V→R); circuit-domain data, not workspace `mutate:rebind`.
 - Probe 05: refuse `R≤0`; rollback worsen; iterative scale to \(v_2\approx 2.5\); analytic one-shot \(R_2=R_1\); skip when within tol; escapes=0.
 
+### Phase 5 narrative (issue #2)
+
+- `devices.aura`: Shockley diode + Ebers-Moll NPN with `pnjlim` voltage limiting and gmin.
+- Dense Newton-Raphson on the existing GE kernel; linear circuits keep the one-shot path (probes 01/02 unchanged).
+- Probe 07: forward \(V_d \approx 0.7\,\mathrm{V}\), reverse \(I \approx 0\), mutate \(I_s\) + rollback.
+- Probe 08: NPN switch on/off, CE mid-rail bias, inverting small-signal polarity, mutate \(\beta_F\).
+- Probe 09: RC + shunt diode clamps a step; BJT inverter `.tran` settles into saturation.
+
 ---
 
 ## Judgment
 
 > On the **P0 Daedalus slice** (linear `.op`, fixed-step `.tran`, parameter mutate, agent auto-tune), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\), probes 00–03 and 05 PASS).  
-> Remaining growth is product depth (topology search, multi-agent, nonlinear devices) — not a denseness blocker for the stated P0 claim.
+> Phase 5 extends that claim to **educational nonlinear** circuits (diode + NPN + NR) with core \(E=0\) (probes 07–09 PASS). Remaining growth is product depth (topology search, multi-agent, commercial models) — not a denseness blocker for the stated P0/P1 educational claim.
 
 ---
 
-## Next (post-P0)
+## Next (post-P0 / post-P1)
 
 1. Topology mutate denseness (insert/remove component under Hermes invariants)
 2. Optional Aether `orch:*` multi-agent compose
-3. Nonlinear devices / Newton (metered escapes if needed)
+3. PNP / LED defaults / simple astable as further educational coverage
 4. Keep [escape-log.md](escape-log.md) / [host-residuals.md](host-residuals.md) current

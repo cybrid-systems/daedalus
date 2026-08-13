@@ -1,0 +1,316 @@
+; lib/devices.aura — Nonlinear devices + NR residual/Jacobian stamp (Phase 5)
+;
+; (require "devices" all:)
+;
+; Shockley diode and Ebers-Moll NPN. Educational-grade, FlatAST-friendly.
+; Voltage limiting (SPICE pnjlim) + gmin keep dense NR inside V_A.
+; Linear stamp path is unchanged; this module only runs when D/Q are present.
+
+(export daed:devices-version
+        daed:clip-exp
+        daed:pnjlim
+        daed:diode-vcrit
+        daed:copy-vec
+        daed:ax-minus-b
+        daed:vec-norm-inf
+        daed:vec-add-scaled!
+        daed:limit-dx!
+        daed:stamp-I-res!
+        daed:jac-add!
+        daed:res-add!
+        daed:stamp-diode-nr!
+        daed:stamp-bjt-nr!
+        daed:stamp-nonlinear!
+        daed:stamp-system-nr
+        daed:stamp-system-nr-tran)
+
+(require "netlist" all:)
+(require "stamp" all:)
+
+(define daed:devices-version 1)
+
+(define daed:exp-clip 40.0)
+(define daed:sqrt2 1.414213562)
+
+; Saturated exp so Is*exp(vd/Vt) cannot overflow the host float.
+(define (daed:clip-exp arg)
+  (if (> arg daed:exp-clip)
+    (exp daed:exp-clip)
+    (if (< arg (* -1.0 daed:exp-clip))
+      (exp (* -1.0 daed:exp-clip))
+      (exp arg))))
+
+; SPICE pnjlim: limit junction voltage used for exp() between iterates.
+(define (daed:pnjlim vnew vold vt vcrit)
+  (let ((out vnew)
+        (dv (- vnew vold))
+        (two-vt (* 2.0 vt)))
+    (if (and (> vnew vcrit) (> (abs dv) two-vt))
+      (if (> vold 0.0)
+        (let ((arg (+ 1.0 (/ dv vt))))
+          (if (> arg 0.0)
+            (set! out (+ vold (* vt (log arg))))
+            (set! out vcrit)))
+        (if (> vnew 0.0)
+          (set! out (* vt (log (/ vnew vt))))
+          (set! out vcrit)))
+      0)
+    out))
+
+(define (daed:diode-vcrit nvt Is)
+  (if (or (not (number? Is)) (<= Is 0.0) (not (number? nvt)) (<= nvt 0.0))
+    0.7
+    (let ((arg (/ nvt (* daed:sqrt2 Is))))
+      (if (<= arg 1.0)
+        nvt
+        (* nvt (log arg))))))
+
+(define (daed:copy-vec v)
+  (let ((n (vector-length v))
+        (out (make-vector (vector-length v) 0.0))
+        (i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (vector-set! out i (vector-ref v i))
+        (set! i (+ i 1))))
+    out))
+
+; y = A x - b  (new vector, length n)
+(define (daed:ax-minus-b A x b n)
+  (let ((y (make-vector n 0.0))
+        (xn (vector-length x))
+        (i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (let ((s 0.0)
+              (j 0))
+          (while (lambda () (< j n))
+            (lambda ()
+              (let ((xj (if (>= j xn) 0.0 (daed:vec-ref x j))))
+                (set! s (+ s (* (daed:mat-ref A n i j) xj))))
+              (set! j (+ j 1))))
+          (daed:vec-set! y i (- s (daed:vec-ref b i))))
+        (set! i (+ i 1))))
+    y))
+
+(define (daed:vec-norm-inf v n)
+  (let ((m 0.0)
+        (i 0)
+        (lim n))
+    (if (> lim (vector-length v))
+      (set! lim (vector-length v))
+      0)
+    (while (lambda () (< i lim))
+      (lambda ()
+        (let ((a (abs (vector-ref v i))))
+          (if (> a m) (set! m a) 0))
+        (set! i (+ i 1))))
+    m))
+
+(define (daed:vec-add-scaled! dst src n scale)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (daed:vec-set! dst i
+          (+ (daed:vec-ref dst i)
+             (* scale (daed:vec-ref src i))))
+        (set! i (+ i 1))))
+    dst))
+
+; Scale voltage-unknown entries of dx so max |dV| ≤ dvmax. Returns scale.
+(define (daed:limit-dx! dx n-v dvmax)
+  (let ((m 0.0)
+        (k 0)
+        (nv n-v))
+    (if (> nv (vector-length dx))
+      (set! nv (vector-length dx))
+      0)
+    (while (lambda () (< k nv))
+      (lambda ()
+        (let ((a (abs (daed:vec-ref dx k))))
+          (if (> a m) (set! m a) 0))
+        (set! k (+ k 1))))
+    (if (or (<= m dvmax) (<= m 0.0) (not (number? dvmax)) (<= dvmax 0.0))
+      1.0
+      (let ((s (/ dvmax m))
+            (i 0)
+            (nn (vector-length dx)))
+        (while (lambda () (< i nn))
+          (lambda ()
+            (daed:vec-set! dx i (* s (daed:vec-ref dx i)))
+            (set! i (+ i 1))))
+        s))))
+
+; Residual current I flowing n1 → n2 (KCL: +I at n1, -I at n2).
+(define (daed:stamp-I-res! F n1 n2 I)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:vec-add! F i1 I)
+      0)
+    (if (>= i2 0)
+      (daed:vec-add! F i2 (* -1.0 I))
+      0)
+    #t))
+
+(define (daed:jac-add! J n na nb val)
+  (let ((i (daed:node-index na))
+        (j (daed:node-index nb)))
+    (if (and (>= i 0) (>= j 0))
+      (daed:mat-add! J n i j val)
+      0)))
+
+(define (daed:res-add! F node val)
+  (let ((i (daed:node-index node)))
+    (if (>= i 0)
+      (daed:vec-add! F i val)
+      0)))
+
+; ── Shockley diode ──
+; Id = Is (e^{vd/(n Vt)} - 1) + gmin vd
+; gd = (Is/(n Vt)) e^{vd/(n Vt)} + gmin
+
+(define (daed:stamp-diode-nr! J F n x x-old c)
+  (let ((n1 (daed:comp-n1 c))
+        (n2 (daed:comp-n2 c))
+        (Is (daed:comp-value c))
+        (nn (hash-ref c "n" 1.0))
+        (vt (hash-ref c "vt" 0.026))
+        (gmin (hash-ref c "gmin" 1e-12)))
+    (if (or (not (number? Is)) (<= Is 0.0)
+            (not (number? nn)) (<= nn 0.0)
+            (not (number? vt)) (<= vt 0.0))
+      #f
+      (let ((nvt (* nn vt))
+            (vd-new (- (daed:x-v x n1) (daed:x-v x n2)))
+            (vd-old (- (daed:x-v x-old n1) (daed:x-v x-old n2))))
+        (let ((vcrit (daed:diode-vcrit nvt Is)))
+          (let ((vd (daed:pnjlim vd-new vd-old nvt vcrit)))
+            (let ((ev (daed:clip-exp (/ vd nvt))))
+              (let ((id (+ (* Is (- ev 1.0)) (* gmin vd)))
+                    (gd (+ (/ (* Is ev) nvt) gmin)))
+                (daed:stamp-G! J n n1 n2 gd)
+                (daed:stamp-I-res! F n1 n2 id)
+                #t))))))))
+
+; ── Ebers-Moll NPN ──
+; IF = Is (e^{vbe/Vt} - 1), IR = Is (e^{vbc/Vt} - 1)
+; IC = IF - IR (1 + 1/βR)
+; IB = IF/βF + IR/βR
+; IE = -(IC + IB)
+
+(define (daed:stamp-bjt-nr! J F n x x-old c)
+  (let ((nc (daed:comp-nc c))
+        (nb (daed:comp-nb c))
+        (ne (daed:comp-ne c))
+        (Is (daed:comp-value c))
+        (bf (hash-ref c "bf" 100.0))
+        (br (hash-ref c "br" 1.0))
+        (vt (hash-ref c "vt" 0.026))
+        (gmin (hash-ref c "gmin" 1e-12))
+        (vbe 0.0)
+        (vbc 0.0)
+        (IF 0.0)
+        (IR 0.0)
+        (gf 0.0)
+        (gr 0.0)
+        (ic 0.0)
+        (ib 0.0)
+        (ie 0.0)
+        (dIc-dVbe 0.0)
+        (dIc-dVbc 0.0)
+        (dIb-dVbe 0.0)
+        (dIb-dVbc 0.0)
+        (dIe-dVbe 0.0)
+        (dIe-dVbc 0.0))
+    (if (or (not (number? Is)) (<= Is 0.0)
+            (not (number? bf)) (<= bf 0.0)
+            (not (number? br)) (<= br 0.0)
+            (not (number? vt)) (<= vt 0.0))
+      #f
+      (begin
+        (set! vbe (daed:pnjlim
+                    (- (daed:x-v x nb) (daed:x-v x ne))
+                    (- (daed:x-v x-old nb) (daed:x-v x-old ne))
+                    vt (daed:diode-vcrit vt Is)))
+        (set! vbc (daed:pnjlim
+                    (- (daed:x-v x nb) (daed:x-v x nc))
+                    (- (daed:x-v x-old nb) (daed:x-v x-old nc))
+                    vt (daed:diode-vcrit vt Is)))
+        (set! IF (* Is (- (daed:clip-exp (/ vbe vt)) 1.0)))
+        (set! IR (* Is (- (daed:clip-exp (/ vbc vt)) 1.0)))
+        (set! gf (/ (* Is (daed:clip-exp (/ vbe vt))) vt))
+        (set! gr (/ (* Is (daed:clip-exp (/ vbc vt))) vt))
+        (set! ic (- IF (* IR (+ 1.0 (/ 1.0 br)))))
+        (set! ib (+ (/ IF bf) (/ IR br)))
+        (set! ie (* -1.0 (+ ic ib)))
+        (daed:res-add! F nc ic)
+        (daed:res-add! F nb ib)
+        (daed:res-add! F ne ie)
+        ; gmin as linear junction conductances (not mixed into gf/gr)
+        (daed:stamp-G! J n nb ne gmin)
+        (daed:stamp-I-res! F nb ne (* gmin vbe))
+        (daed:stamp-G! J n nb nc gmin)
+        (daed:stamp-I-res! F nb nc (* gmin vbc))
+        (set! dIc-dVbe gf)
+        (set! dIc-dVbc (* -1.0 (* gr (+ 1.0 (/ 1.0 br)))))
+        (set! dIb-dVbe (/ gf bf))
+        (set! dIb-dVbc (/ gr br))
+        (set! dIe-dVbe (* -1.0 (+ dIc-dVbe dIb-dVbe)))
+        (set! dIe-dVbc (* -1.0 (+ dIc-dVbc dIb-dVbc)))
+        ; vbe = vB - vE, vbc = vB - vC
+        (daed:jac-add! J n nc nc (* -1.0 dIc-dVbc))
+        (daed:jac-add! J n nc nb (+ dIc-dVbe dIc-dVbc))
+        (daed:jac-add! J n nc ne (* -1.0 dIc-dVbe))
+        (daed:jac-add! J n nb nc (* -1.0 dIb-dVbc))
+        (daed:jac-add! J n nb nb (+ dIb-dVbe dIb-dVbc))
+        (daed:jac-add! J n nb ne (* -1.0 dIb-dVbe))
+        (daed:jac-add! J n ne nc (* -1.0 dIe-dVbc))
+        (daed:jac-add! J n ne nb (+ dIe-dVbe dIe-dVbc))
+        (daed:jac-add! J n ne ne (* -1.0 dIe-dVbe))
+        #t))))
+
+(define (daed:stamp-nonlinear! J F n x x-old comps)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (let ((ty (daed:comp-type (car cs))))
+          (cond
+            ((equal? ty "D")
+             (daed:stamp-diode-nr! J F n x x-old (car cs)))
+            ((equal? ty "Q")
+             (daed:stamp-bjt-nr! J F n x x-old (car cs)))
+            (else 0)))
+        (loop (cdr cs))))))
+
+; DC NR system: J and F such that J dx = -F. Linear devices via stamp-system.
+; Returns (list N J F n-v)
+(define (daed:stamp-system-nr comps x x-old)
+  (let ((lin (daed:stamp-system comps)))
+    (let ((N (car lin))
+          (A (car (cdr lin)))
+          (b (car (cdr (cdr lin))))
+          (n-v (car (cdr (cdr (cdr lin))))))
+      (if (<= N 0)
+        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+        (let ((xx (if x x (make-vector N 0.0)))
+              (xo (if x-old x-old (make-vector N 0.0))))
+          (let ((F (daed:ax-minus-b A xx b N)))
+            (daed:stamp-nonlinear! A F N xx xo comps)
+            (list N A F n-v)))))))
+
+; TRAN NR system: linear BE companions + same nonlinear stamps.
+(define (daed:stamp-system-nr-tran comps h state x x-old)
+  (let ((lin (daed:stamp-system-tran comps h state)))
+    (let ((N (car lin))
+          (A (car (cdr lin)))
+          (b (car (cdr (cdr lin))))
+          (n-v (car (cdr (cdr (cdr lin))))))
+      (if (<= N 0)
+        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+        (let ((xx (if x x (make-vector N 0.0)))
+              (xo (if x-old x-old (make-vector N 0.0))))
+          (let ((F (daed:ax-minus-b A xx b N)))
+            (daed:stamp-nonlinear! A F N xx xo comps)
+            (list N A F n-v)))))))

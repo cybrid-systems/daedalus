@@ -1,4 +1,4 @@
-; lib/daedalus-min.aura — Phase 4 facade (.op + .tran + mutate + agent loop)
+; lib/daedalus-min.aura — Phase 5 facade (.op + .tran + mutate + agent + NR)
 ;
 ; (require "daedalus-min" all:)
 ; Form order: export BEFORE require (#2766).
@@ -19,36 +19,48 @@
         daed:escape-count
         ; netlist
         daed:netlist-version
-        daed:comp daed:R daed:C daed:L daed:V daed:I daed:circuit
+        daed:comp daed:R daed:C daed:L daed:V daed:I daed:D daed:D* daed:Q daed:Q*
+        daed:circuit
         daed:ckt-name daed:ckt-comps
-        daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2
+        daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2 daed:comp-n3
+        daed:comp-nc daed:comp-nb daed:comp-ne
         daed:comp-value daed:comp-set-value!
+        daed:comp-param daed:comp-set-param!
+        daed:has-nonlinear?
         daed:max-node daed:count-type daed:node-index
         daed:n-voltage-unknowns
-        daed:node-voltage daed:set-node-voltage!
+        daed:node-voltage daed:set-node-voltage! daed:x-v
         ; stamp
         daed:stamp-version daed:mna-size daed:mna-size-tran
         daed:stamp-system daed:stamp-system-tran
         daed:mat-ref daed:mat-set! daed:mat-add!
         daed:vec-ref daed:vec-set! daed:vec-add!
         daed:stamp-G! daed:stamp-I!
+        ; devices / NR stamp
+        daed:devices-version
+        daed:clip-exp daed:pnjlim daed:diode-vcrit
+        daed:stamp-system-nr daed:stamp-system-nr-tran
+        daed:stamp-diode-nr! daed:stamp-bjt-nr!
         ; solve
-        daed:solve-version daed:dense-solve!
+        daed:solve-version daed:dense-solve! daed:newton-solve
         daed:simulate-op
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
+        daed:op-iters daed:op-residual
+        daed:nr-maxiter daed:nr-atol daed:nr-vtol daed:nr-dvmax
         ; tran
         daed:tran-version
         daed:make-tran-state daed:nsteps-for daed:as-int daed:simulate-tran
         daed:tran-ok? daed:tran-dt daed:tran-tstop daed:tran-nsteps
         daed:tran-times daed:tran-series daed:tran-v daed:tran-v-at
+        daed:tran-iters daed:tran-nr-fail
         ; probe
         daed:probe-version daed:v daed:v-ground
         daed:check-voltage
         ; mutate (Phase 3)
         daed:mutate-version
         daed:find-comp daed:clone-comp daed:clone-circuit
-        daed:topology-ok? daed:value-ok?
-        daed:mutate-value! daed:mutate!
+        daed:topology-ok? daed:value-ok? daed:param-ok?
+        daed:mutate-value! daed:mutate-param! daed:mutate!
         daed:restore-circuit! daed:circuit-snapshot daed:comp-snapshot-value
         daed:snapshot daed:restore!
         daed:mutate-ok? daed:mutate-reason daed:mutate-old daed:mutate-new
@@ -68,6 +80,7 @@
 
 (require "netlist" all:)
 (require "stamp" all:)
+(require "devices" all:)
 (require "solve" all:)
 (require "tran" all:)
 (require "probe" all:)
@@ -75,8 +88,8 @@
 (require "agent" all:)
 (require "viz" all:)
 
-; 4 = Phase 4 agent auto-tune; viz is issue #1 (not a denseness phase bump)
-(define daed:min-version 4)
+; 5 = Phase 5 nonlinear devices + Newton-Raphson (issue #2)
+(define daed:min-version 5)
 
 ; ── Alist helper ──
 (define (daed:alist-ref key lst default)
