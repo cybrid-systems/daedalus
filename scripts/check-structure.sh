@@ -55,6 +55,8 @@ required=(
   "examples/10-vision-pipeline/README.md"
   "examples/11-controlled-sources/main.aura"
   "examples/11-controlled-sources/README.md"
+  "examples/12-linear-op-suite/main.aura"
+  "examples/12-linear-op-suite/README.md"
   "scripts/extract-ir.py"
   "scripts/from-image.sh"
   "scripts/run-aura.sh"

@@ -57,6 +57,11 @@ host escape** (xAI or MiniMax multimodal). Probes use fixtures only (`E=0`).
 
 No leave from \(V_A\). VCVS/VCCS/CCCS/CCVS stamps are pure Aura on the dense MNA kernel.
 
+## Issue #13 (linear .op suite)
+
+No leave from \(V_A\). Branch-current extract reads the existing MNA unknown
+vector; comparison is hand calculation (optional ngspice decks are documentation).
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

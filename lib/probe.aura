@@ -4,6 +4,7 @@
 
 (export daed:probe-version
         daed:v
+        daed:i
         daed:v-ground
         daed:check-approx
         daed:check-voltage
@@ -12,7 +13,7 @@
 (require "solve" all:)
 (require "tran" all:)
 
-(define daed:probe-version 2)
+(define daed:probe-version 3)
 
 ; Node voltage from .op result. Node 0 → 0.0.
 ; Also accepts a .tran result (final sample) for convenience.
@@ -23,6 +24,10 @@
       (daed:tran-v res node)
       (let ((volts (daed:op-voltages res)))
         (hash-ref volts (number->string node) 0.0)))))
+
+; Branch current from .op (named V/E/H/L). 0 if missing.
+(define (daed:i res name)
+  (daed:op-i res name))
 
 (define (daed:v-ground)
   0.0)

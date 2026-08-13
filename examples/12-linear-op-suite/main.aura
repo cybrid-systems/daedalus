@@ -1,0 +1,165 @@
+; examples/12-linear-op-suite/main.aura
+;
+; Milestone 0 / issue #13 — linear .op suite + denseness metrics.
+; Three hand-calc probes + branch currents + snapshot restore.
+;
+;   A. Voltage divider: v2=10/3, i(vin)=−1/600
+;   B. Current source + series R: I=1mA, R1=R2=1k → v1=2, v2=1
+;   C. VCVS gain-2: v2=10, i(amp)=−10mA
+;
+; Axes: MNA stamp + dense GE + result extract + dual snapshot
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/12-linear-op-suite/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 12-linear-op-suite: M0 .op denseness ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " solve=")
+(display daed:solve-version)
+(display " stamp=")
+(display daed:stamp-version)
+(newline)
+
+; ── A. Voltage divider vs hand calc ──
+(define Vin 5.0)
+(define R1 1e3)
+(define R2 2e3)
+(define want-v2 (/ (* Vin R2) (+ R1 R2)))
+(define want-ivin (* -1.0 (/ (- Vin want-v2) R1)))
+
+(define ckt-a
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 R1)
+          (daed:R "r2" 2 0 R2))))
+
+(define op-a (daed:simulate-op ckt-a))
+(daed:stats-bump! "sim_runs")
+(define a-ok (daed:check-true (daed:op-ok? op-a)))
+(define a-v1 (daed:check-rel (daed:v op-a 1) Vin 1e-6 1e-9))
+(define a-v2 (daed:check-rel (daed:v op-a 2) want-v2 1e-6 1e-9))
+(define a-i (daed:check-rel (daed:i op-a "vin") want-ivin 1e-5 1e-12))
+
+(display "A divider v1=")
+(display (daed:v op-a 1))
+(display " v2=")
+(display (daed:v op-a 2))
+(display " want-v2=")
+(display want-v2)
+(display " i(vin)=")
+(display (daed:i op-a "vin"))
+(display " want=")
+(display want-ivin)
+(newline)
+
+; ── B. Current source + resistor ladder ──
+; I from GND into n1 = 1 mA; R1=1k n1–n2; R2=1k n2–GND
+; v1=2 V, v2=1 V
+(define Iin 1e-3)
+(define ckt-b
+  (daed:circuit "i-net"
+    (list (daed:I "iin" 0 1 Iin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 1e3))))
+
+(define op-b (daed:simulate-op ckt-b))
+(daed:stats-bump! "sim_runs")
+(define b-ok (daed:check-true (daed:op-ok? op-b)))
+(define b-v1 (daed:check-rel (daed:v op-b 1) 2.0 1e-6 1e-9))
+(define b-v2 (daed:check-rel (daed:v op-b 2) 1.0 1e-6 1e-9))
+
+(display "B i-net v1=")
+(display (daed:v op-b 1))
+(display " v2=")
+(display (daed:v op-b 2))
+(display " want 2 / 1")
+(newline)
+
+; ── C. VCVS (issue #12 circuit) vs hand calc ──
+(define ckt-c
+  (daed:circuit "vcvs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:E "amp" 2 0 1 0 2.0)
+          (daed:R "rl" 2 0 1e3))))
+
+(define op-c (daed:simulate-op ckt-c))
+(daed:stats-bump! "sim_runs")
+(define c-ok (daed:check-true (daed:op-ok? op-c)))
+(define c-v (daed:check-rel (daed:v op-c 2) 10.0 1e-6 1e-9))
+(define c-i (daed:check-rel (daed:i op-c "amp") -0.01 1e-5 1e-12))
+
+(display "C vcvs v2=")
+(display (daed:v op-c 2))
+(display " i(amp)=")
+(display (daed:i op-c "amp"))
+(display " want 10 / -0.01")
+(newline)
+
+; ── D. Snapshot successful .op, mutate, restore, re-sim ──
+(define snap (daed:snapshot ckt-a "pre-op"))
+(define v2-0 (daed:v op-a 2))
+(define mut (daed:mutate! ckt-a "r2" 1e3))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define op-m (daed:simulate-op ckt-a))
+(daed:stats-bump! "sim_runs")
+(define mut-v (daed:check-approx (daed:v op-m 2) 2.5 1e-4))
+(define rst (daed:restore! ckt-a snap))
+(define rst-ok (daed:check-true rst))
+(define op-r (daed:simulate-op ckt-a))
+(daed:stats-bump! "sim_runs")
+(define rst-v (daed:check-rel (daed:v op-r 2) v2-0 1e-6 1e-9))
+(define rst-i (daed:check-rel (daed:i op-r "vin") want-ivin 1e-5 1e-12))
+
+(display "D snapshot restore v2=")
+(display (daed:v op-r 2))
+(display " i(vin)=")
+(display (daed:i op-r "vin"))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(define all-ok
+  (and a-ok a-v1 a-v2 a-i
+       b-ok b-v1 b-v2
+       c-ok c-v c-i
+       mut-ok mut-v rst-ok rst-v rst-i
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)
+       (>= (daed:stats-ref "rollbacks") 1)))
+
+(if all-ok
+  (begin
+    (display "PASS: linear .op suite vs hand calc (escapes=0)")
+    (newline)
+    (display "RESULT pass example=12-linear-op-suite escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: linear .op denseness suite")
+    (newline)
+    (display "RESULT fail example=12-linear-op-suite")
+    (newline)
+    (display "  a-v2=")
+    (display a-v2)
+    (display " a-i=")
+    (display a-i)
+    (display " b-v1=")
+    (display b-v1)
+    (display " c-v=")
+    (display c-v)
+    (display " rst-v=")
+    (display rst-v)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

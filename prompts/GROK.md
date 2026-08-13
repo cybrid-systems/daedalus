@@ -44,6 +44,7 @@ Primary objects under test:
 - Probe `09-diode-clamp-tran` — BE+NR nonlinear `.tran`, escapes=0 (issue #2)
 - Probe `10-vision-pipeline` — IR → validate → repair → fixture `from-image`, escapes=0 (issue #6)
 - Probe `11-controlled-sources` — E/G/F/H FlatAST + stamp, escapes=0 (issue #12)
+- Probe `12-linear-op-suite` — divider / I-network / VCVS vs hand calc + snapshot, escapes=0 (issue #13)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 

@@ -50,7 +50,7 @@
         daed:solve-version daed:dense-solve! daed:newton-solve
         daed:simulate-op
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
-        daed:op-iters daed:op-residual
+        daed:op-iters daed:op-residual daed:op-i daed:op-ibranch
         daed:nr-maxiter daed:nr-atol daed:nr-vtol daed:nr-dvmax
         ; tran
         daed:tran-version
@@ -59,7 +59,7 @@
         daed:tran-times daed:tran-series daed:tran-v daed:tran-v-at
         daed:tran-iters daed:tran-nr-fail
         ; probe
-        daed:probe-version daed:v daed:v-ground
+        daed:probe-version daed:v daed:i daed:v-ground
         daed:check-voltage
         ; mutate (Phase 3)
         daed:mutate-version

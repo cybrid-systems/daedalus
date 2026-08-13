@@ -16,6 +16,7 @@ PROBES=(
   09-diode-clamp-tran
   10-vision-pipeline
   11-controlled-sources
+  12-linear-op-suite
 )
 
 pass=0

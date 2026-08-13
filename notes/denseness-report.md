@@ -44,6 +44,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [09](../examples/09-diode-clamp-tran/) | BE+NR nonlinear `.tran` | **PASS** | 0 | 0 |
 | [10](../examples/10-vision-pipeline/) | IR → repair → simulate (issue #6) | **PASS** | 0 | 0 |
 | [11](../examples/11-controlled-sources/) | E/G/F/H stamp (issue #12) | **PASS** | 0 | 0 |
+| [12](../examples/12-linear-op-suite/) | linear `.op` vs hand calc (issue #13) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 

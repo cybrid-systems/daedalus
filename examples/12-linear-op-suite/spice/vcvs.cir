@@ -1,0 +1,7 @@
+* Daedalus 12 — VCVS gain 2 (hand: v(2)=10)
+Vin 1 0 DC 5
+Eamp 2 0 1 0 2
+Rl 2 0 1k
+.op
+.print dc v(1) v(2)
+.end

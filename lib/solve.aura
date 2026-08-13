@@ -21,6 +21,8 @@
         daed:op-voltages
         daed:op-iters
         daed:op-residual
+        daed:op-i
+        daed:op-ibranch
         daed:nr-maxiter
         daed:nr-atol
         daed:nr-vtol
@@ -30,8 +32,8 @@
 (require "stamp" all:)
 (require "devices" all:)
 
-; 3 = Phase 5 Newton-Raphson for D/Q
-(define daed:solve-version 3)
+; 4 = issue #13 branch-current extraction
+(define daed:solve-version 4)
 
 (define daed:nr-maxiter 50)
 (define daed:nr-atol 1e-8)
@@ -119,6 +121,21 @@
                     (daed:vec-set! b i (/ s diag)))))
               (set! i (- i 1)))))
         ok))))
+
+; Branch currents from x using the DC (or TRAN) branch map.
+(define (daed:ibranch-from-x x comps dc?)
+  (let ((h (hash))
+        (br (daed:branch-map comps dc?)))
+    (let loop ((cs comps))
+      (if (null? cs)
+        h
+        (begin
+          (let ((nm (daed:comp-name (car cs))))
+            (let ((idx (hash-ref br nm #f)))
+              (if (and (number? idx) (>= idx 0) (< idx (vector-length x)))
+                (hash-set! h nm (daed:vec-ref x idx))
+                0)))
+          (loop (cdr cs)))))))
 
 ; Pack node voltages from x into a "volts" hash.
 (define (daed:volts-from-x x n-v)
@@ -239,11 +256,14 @@
             (hash-set! res "ok" #f)
             (hash-set! res "x" (make-vector 0 0.0))
             (hash-set! res "volts" (hash))
+            (hash-set! res "ibranch" (hash))
             res)
           (let ((ok (daed:dense-solve! A b N)))
             (hash-set! res "ok" ok)
             (hash-set! res "x" b)
             (hash-set! res "volts" (if ok (daed:volts-from-x b n-v) (hash)))
+            (hash-set! res "ibranch"
+              (if ok (daed:ibranch-from-x b comps #t) (hash)))
             res))))))
 
 (define (daed:simulate-op-nr comps)
@@ -255,6 +275,11 @@
         (if (hash-ref nr "ok" #f)
           (daed:volts-from-x (hash-ref nr "x" (make-vector 0 0.0))
                              (hash-ref nr "n_v" 0))
+          (hash)))
+      (hash-set! nr "ibranch"
+        (if (hash-ref nr "ok" #f)
+          (daed:ibranch-from-x (hash-ref nr "x" (make-vector 0 0.0))
+                               comps #t)
           (hash)))
       nr)))
 
@@ -278,3 +303,10 @@
 
 (define (daed:op-residual res)
   (hash-ref res "residual" 0.0))
+
+(define (daed:op-ibranch res)
+  (hash-ref res "ibranch" (hash)))
+
+; Branch current of a named V/E/H (or DC L) unknown.
+(define (daed:op-i res name)
+  (hash-ref (daed:op-ibranch res) name 0.0))

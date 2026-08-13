@@ -1,0 +1,7 @@
+* Daedalus 12 — voltage divider (hand: v(2)=10/3)
+Vin 1 0 DC 5
+R1 1 2 1k
+R2 2 0 2k
+.op
+.print dc v(1) v(2)
+.end

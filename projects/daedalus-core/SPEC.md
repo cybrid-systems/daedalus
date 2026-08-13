@@ -78,3 +78,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] denseness probe 09 (diode clamp + BJT switch `.tran`)
 - [x] Vision → IR → repair → simulate (`ir`/`validate`/`repair`/`vision`, probe 10; issue #6)
 - [x] Controlled sources E/G/F/H + query (issue #12, probe 11)
+- [x] Linear `.op` suite + branch currents + snapshot (issue #13, probe 12)

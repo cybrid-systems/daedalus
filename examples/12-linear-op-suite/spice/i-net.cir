@@ -1,0 +1,7 @@
+* Daedalus 12 — current source + series R (hand: v(1)=2 v(2)=1)
+Iin 0 1 DC 1m
+R1 1 2 1k
+R2 2 0 1k
+.op
+.print dc v(1) v(2)
+.end

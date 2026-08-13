@@ -234,6 +234,12 @@ Controlled sources VCVS/VCCS/CCCS/CCVS ([issue #12](https://github.com/cybrid-sy
 ./scripts/run-aura.sh examples/11-controlled-sources/main.aura
 ```
 
+Linear `.op` denseness suite ([issue #13](https://github.com/cybrid-systems/daedalus/issues/13)):
+
+```bash
+./scripts/run-aura.sh examples/12-linear-op-suite/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a
