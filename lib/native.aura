@@ -1,0 +1,192 @@
+; lib/native.aura — C++ dense-solve escape (issue #28 / M5)
+;
+; (require "native" all:)
+;
+; Hephaestus-pattern rebind: logical kernel daed:dense-solve! is
+; "pure" (default) or "native". Native path is c-load + copy-in/out
+; Opaque buffers (issue #32). Each native call is a metered escape.
+; Failure of bind or solve leaves the Aura matrix untouched.
+
+(export daed:native-version
+        daed:native-ready?
+        daed:native-lib
+        daed:solve-backend
+        daed:solve-rebind!
+        daed:solve-rebind-ok?
+        daed:solve-rebind-reason
+        daed:solve-rebind-prev
+        daed:dense-solve-native!
+        daed:native-set-fail!
+        daed:native-calls
+        daed:native-on-escape!
+        daed:solve-backend-set!)
+
+; No require: FFI primitives are host-core. Escape hook set by the facade.
+
+(define daed:native-version 1)
+
+(define *daed-solve-backend* "pure")
+(define *daed-native-lib* #f)
+(define *daed-native-solve* #f)
+(define *daed-native-ver* #f)
+(define *daed-native-fail* #f)
+(define *daed-native-tried* #f)
+(define *daed-native-calls* 0)
+(define *daed-native-escape-hook* #f)
+
+(define (daed:native-calls)
+  *daed-native-calls*)
+
+(define (daed:native-on-escape! fn)
+  (set! *daed-native-escape-hook* fn)
+  #t)
+
+(define (daed:native-escape! tag)
+  (set! *daed-native-calls* (+ 1 *daed-native-calls*))
+  (if *daed-native-escape-hook*
+    (*daed-native-escape-hook* tag)
+    #t))
+
+(define (daed:solve-backend)
+  *daed-solve-backend*)
+
+(define (daed:solve-backend-set! k)
+  (set! *daed-solve-backend* (if (string? k) k "pure"))
+  *daed-solve-backend*)
+
+(define (daed:native-lib)
+  *daed-native-lib*)
+
+(define (daed:native-try-path path)
+  (let ((hid (try (c-load path) (catch (e) -2)))
+        (disp #f)
+        (v -1))
+    (if (not (number? hid))
+      #f
+      (begin
+        (set! disp (try (c-func hid "daed_dispatch"
+                                "(Int Int Int Int) -> Int")
+                        (catch (e) #f)))
+        (if (or (not disp) (number? disp))
+          #f
+          (begin
+            (set! v (try (disp 0 0 0 0) (catch (e) -1)))
+            (if (= v 1)
+              (begin
+                (set! *daed-native-lib* hid)
+                (set! *daed-native-solve* disp)
+                disp)
+              #f)))))))
+
+(define (daed:native-bind!)
+  (if *daed-native-tried*
+    *daed-native-solve*
+    (begin
+      (set! *daed-native-tried* #t)
+      (if (daed:native-try-path "native/libdaed_solve.so")
+        *daed-native-solve*
+        (daed:native-try-path "native/libdaed_solve.dylib")))))
+
+(define (daed:native-ready?)
+  (if *daed-native-solve*
+    #t
+    (if (daed:native-bind!)
+      #t
+      #f)))
+
+(define (daed:f64-off i)
+  (inexact->exact (* i 8)))
+
+(define (daed:pack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (c-struct-set! buf (daed:f64-off i) (vector-ref vec i))
+        (set! i (+ i 1))))
+    buf))
+
+(define (daed:unpack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (vector-set! vec i (c-struct-ref buf (daed:f64-off i) 1))
+        (set! i (+ i 1))))
+    vec))
+
+(define (daed:native-set-fail! on)
+  (if (not (daed:native-ready?))
+    #f
+    (begin
+      (*daed-native-solve* 1 (if on 1 0) 0 0)
+      #t)))
+
+; Copy A,b → Opaque, call C++, copy b back on rc=0.
+(define (daed:dense-solve-native! A b n)
+  (if (not (daed:native-ready?))
+    #f
+    (if (or (not (number? n)) (<= n 0))
+      #f
+      (let ((nn (inexact->exact n))
+            (Ab #f)
+            (bb #f)
+            (rc -1))
+        (set! Ab (c-alloc (inexact->exact (* nn nn 8))))
+        (set! bb (c-alloc (inexact->exact (* nn 8))))
+        (if (or (not Ab) (not bb) (number? Ab) (number? bb))
+          #f
+          (begin
+            (daed:pack-f64! Ab A (* nn nn))
+            (daed:pack-f64! bb b nn)
+            (daed:native-escape! "native-dense-solve")
+            (set! rc
+              (try (*daed-native-solve* 2
+                                        (c-opaque->int Ab)
+                                        (c-opaque->int bb)
+                                        nn)
+                   (catch (e) -1)))
+            (if (= rc 0)
+              (begin
+                (daed:unpack-f64! bb b nn)
+                (c-free Ab)
+                (c-free bb)
+                #t)
+              (begin
+                (c-free Ab)
+                (c-free bb)
+                #f))))))))
+
+; Hephaestus rebind-safe pattern (no heph lib required).
+; kind: "pure" | "native"
+(define (daed:solve-rebind! kind)
+  (let ((res (hash))
+        (prev *daed-solve-backend*)
+        (want (if (string? kind) kind "pure")))
+    (hash-set! res "ok" #f)
+    (hash-set! res "prev" prev)
+    (hash-set! res "kind" want)
+    (hash-set! res "reason" "init")
+    (if (equal? want "native")
+      (if (not (daed:native-ready?))
+        (begin
+          (hash-set! res "reason" "no-lib")
+          res)
+        (begin
+          (set! *daed-solve-backend* "native")
+          (hash-set! res "ok" #t)
+          (hash-set! res "reason" "applied")
+          res))
+      (begin
+        (set! *daed-solve-backend* "pure")
+        (daed:native-set-fail! #f)
+        (hash-set! res "ok" #t)
+        (hash-set! res "reason" "applied")
+        res))))
+
+(define (daed:solve-rebind-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:solve-rebind-reason r)
+  (hash-ref r "reason" ""))
+
+(define (daed:solve-rebind-prev r)
+  (hash-ref r "prev" "pure"))

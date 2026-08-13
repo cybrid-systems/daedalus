@@ -39,6 +39,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 23 | [agent-evolve](23-agent-evolve/) | spec-driven agent search | **PASS** (issue #24 / M4) |
 | 24 | [topo-mutate](24-topo-mutate/) | topology add/remove/search | **PASS** (issue #25 / M4) |
 | 25 | [spice-export](25-spice-export/) | FlatAST → SPICE export | **PASS** (issue #26 / M4) |
+| 26 | [native-hotswap](26-native-hotswap/) | C++ GE hot-swap + fallback | **PASS** (issue #28 / M5) |
 
 ## Phase map
 
@@ -57,3 +58,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **M2** | 17–19 | Adaptive `.tran`, MOSFET, `.measure` (issues #18–#20) |
 | **M3** | 20–22 | Convergence aids + `.step` / temperature + Monte Carlo (issues #21–#23) |
 | **M4** | 23–25 | Agent search + topology mutate + SPICE export (issues #24–#26) |
+| **M5** | 26 | Native C++ dense-solve hot-swap (issue #28) |

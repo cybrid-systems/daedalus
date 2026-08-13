@@ -49,7 +49,10 @@
         daed:stamp-system-nr daed:stamp-system-nr-tran
         daed:stamp-diode-nr! daed:stamp-bjt-nr! daed:stamp-mos-nr!
         ; solve
-        daed:solve-version daed:dense-solve! daed:newton-solve
+        daed:solve-version daed:dense-solve! daed:dense-solve-pure! daed:newton-solve
+        daed:native-version daed:native-ready? daed:solve-backend
+        daed:solve-rebind! daed:solve-rebind-ok? daed:solve-rebind-reason
+        daed:dense-solve-native! daed:native-set-fail! daed:native-calls
         daed:simulate-op daed:simulate-op-from daed:simulate-op-gmin
         daed:simulate-op-gmin-step daed:simulate-op-source
         daed:simulate-op-ptran daed:simulate-op-aid
@@ -168,6 +171,7 @@
 (require "netlist" all:)
 (require "stamp" all:)
 (require "devices" all:)
+(require "native" all:)
 (require "solve" all:)
 (require "tran" all:)
 (require "probe" all:)
@@ -620,3 +624,5 @@
 
 (define (daed:escape-count)
   (daed:stats-ref "escapes"))
+
+(daed:native-on-escape! daed:escape-note!)

@@ -16,7 +16,7 @@ A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 | **M2** | Transient + devices | **done** (#18–#20) |
 | **M3** | Convergence & analysis | **done** (#21–#23) |
 | **M4** | Agent-driven evolution | **done** (#24–#26) |
-| **M5** | Native kernel escape | **open** (parent #28) |
+| **M5** | Native kernel escape | **slice landed** (parent #28, probe 26) |
 
 ## Milestone 0 – P0 Completion — done
 
@@ -50,10 +50,15 @@ Related: #2 (Phase 5), #3 diode, #4 BJT, #5 Newton-Raphson.
 - [x] [#25](https://github.com/cybrid-systems/daedalus/issues/25) Topology mutation surface — probe 24
 - [x] [#26](https://github.com/cybrid-systems/daedalus/issues/26) SPICE export for sign-off — probe 25
 
-## Milestone 5 – Native Kernel Escape — open
+## Milestone 5 – Native Kernel Escape — slice landed (issue #28)
 
-Parent: **[#28](https://github.com/cybrid-systems/daedalus/issues/28)**
+Parent: **[#28](https://github.com/cybrid-systems/daedalus/issues/28)** — probe 26.
 
+The #28 success criteria are met (ABI, `c-load`, rebind-safe pattern, Opaque
+copy, divider demo, optional dispatch). Sub-issues #29–#34 remain for
+follow-up polish unless closed separately.
+
+- [x] [#28](https://github.com/cybrid-systems/daedalus/issues/28) Parent success criteria — probe 26
 - [ ] [#29](https://github.com/cybrid-systems/daedalus/issues/29) ABI + build conventions
 - [ ] [#30](https://github.com/cybrid-systems/daedalus/issues/30) Aura FFI (`c-load` / `c-func`)
 - [ ] [#31](https://github.com/cybrid-systems/daedalus/issues/31) Hephaestus wrapper + escape metering

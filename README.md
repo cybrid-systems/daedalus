@@ -159,7 +159,12 @@ Daedalus is better at teaching students how to **understand and reshape circuits
 P0 core, educational nonlinear, adaptive `.tran`, MOSFET, `.measure`, convergence aids, Monte Carlo, agent evolve, topology mutate, SPICE export. **Done.**
 
 **M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28))  
-Optional metered C++ kernel hot-swap. Open.
+Optional metered C++ dense-solve hot-swap (probe 26). Default backend remains pure.
+
+```bash
+./scripts/build-native.sh
+./scripts/run-aura.sh examples/26-native-hotswap/main.aura
+```
 
 **Non-goals (P0 / P1)**  
 Full BSIM, commercial-grade sparse solvers, schematic capture UI, mixed-signal co-simulation.

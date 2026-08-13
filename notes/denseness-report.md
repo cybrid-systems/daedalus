@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0–M4** — probes **00–03, 05–25** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–26** PASS; core \(E=0\) on the default pure backend. Native GE (probe 26) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -58,6 +58,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [23](../examples/23-agent-evolve/) | spec-driven agent search (issue #24) | **PASS** | 0 | 0 |
 | [24](../examples/24-topo-mutate/) | topology mutate + family search (issue #25) | **PASS** | 0 | 0 |
 | [25](../examples/25-spice-export/) | FlatAST → SPICE export (issue #26) | **PASS** | 0 | 0 |
+| [26](../examples/26-native-hotswap/) | C++ GE hot-swap (issue #28) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -165,6 +166,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Probe 25: divider + agent-tuned R2 + D/Q/M models + write `out/*.cir`.
 - Live `scripts/roundtrip-spice.sh` is an optional host oracle (same class as #17).
 
+### Issue #28 narrative (native kernel escape)
+
+- `native/`: `extern "C"` `daed_solve_dense` / `daed_abi_version` / `daed_set_fail`.
+- `native.aura`: `c-load` + Opaque copy-in/out; `solve-rebind!` is the Hephaestus rebind-safe pattern.
+- `dense-solve!` dispatches; default `"pure"` (probes 00–25 stay E=0). Native fail flips back to pure and retries.
+- Probe 26: divider matches; escape +1 on native; poison → fallback; snapshot restore.
+
 ## Judgment
 
 > On the **P0 Daedalus slice** (linear `.op`, fixed-step `.tran`, parameter mutate, agent auto-tune), \(V_A\) is **practically dense** for the evolvable core (core \(E=0\), probes 00–03 and 05 PASS).  
@@ -174,7 +182,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 
 ## Next (post-M4)
 
-1. Milestone 5 — native C++ kernel escape ([#28](https://github.com/cybrid-systems/daedalus/issues/28)–#34); see [roadmap.md](roadmap.md)
+1. M5 follow-through (#29–#34 polish) after the #28 hot-swap slice; see [roadmap.md](roadmap.md)
 2. Optional Aether `orch:*` multi-agent compose
 3. PNP / LED defaults / simple astable as further educational coverage
 4. Keep [escape-log.md](escape-log.md) / [host-residuals.md](host-residuals.md) current

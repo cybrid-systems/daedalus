@@ -126,6 +126,12 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #28 (native dense solve)
+
+| Date | Location | Reason | Mechanism | Impact | Mitigation / Plan |
+|------|----------|--------|-----------|--------|-------------------|
+| 2026-08-14 | `lib/native.aura` + `native/daed_solve.cpp` | Dense GE speed path | `c-load` / `c-func` + Opaque copy-in/out | Opt-in only (`solve-rebind! "native"`). Default backend is pure. Each call is `daed:escape-note!`. Poison/`rc≠0` restores `"pure"` and retries GE in \(V_A\). | Keep default pure; log every native call |
+
 ## Issue #26 (SPICE export)
 
 No leave from \(V_A\) on the probe path. Deck build is pure string concat.

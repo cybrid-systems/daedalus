@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+echo "======== build-native ========"
+if ./scripts/build-native.sh; then
+  echo "native kernel ready"
+else
+  echo "warning: native kernel build failed; probe 26 will fail ready?" >&2
+fi
+
 PROBES=(
   00-smoke
   01-voltage-divider
@@ -30,6 +37,7 @@ PROBES=(
   23-agent-evolve
   24-topo-mutate
   25-spice-export
+  26-native-hotswap
 )
 
 pass=0

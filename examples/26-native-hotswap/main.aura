@@ -1,0 +1,157 @@
+; examples/26-native-hotswap/main.aura
+;
+; Milestone 5 / issue #28 — pure → C++ dense solve → rollback.
+;   A. Pure-Aura divider .op, escapes=0
+;   B. Rebind native; same v2; escape count increases
+;   C. Poison native; auto-fallback to pure; circuit intact
+;   D. Snapshot / restore still works after native run
+;
+; Axes: c-load + Opaque copy + rebind-safe + escape meter
+; Default backend stays pure (other probes E=0)
+;
+; Build first: ./scripts/build-native.sh
+; Run: ./scripts/run-aura.sh examples/26-native-hotswap/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 26-native-hotswap: C++ GE hot-swap ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " solve=")
+(display daed:solve-version)
+(display " native=")
+(display daed:native-version)
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:native-version)
+                                     (>= daed:native-version 1)
+                                     (>= daed:solve-version 7)
+                                     (equal? (daed:solve-backend) "pure"))))
+
+(define ready (daed:native-ready?))
+(define ready-ok (daed:check-true ready))
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+; ── A. Pure ──
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v0 (daed:v op0 2))
+(define want (/ 10.0 3.0))
+(define a-ok (daed:check-true (daed:op-ok? op0)))
+(define a-v (daed:check-rel v0 want 1e-6 1e-9))
+(define a-e (daed:check-eq (daed:escape-count) 0))
+
+(display "A pure v2=")
+(display v0)
+(display " escapes=")
+(display (daed:escape-count))
+(newline)
+
+; ── B. Native ──
+(define rb (daed:solve-rebind! "native"))
+(define b-rb (daed:check-true (and (daed:solve-rebind-ok? rb)
+                                   (equal? (daed:solve-backend) "native"))))
+(define e1 (daed:escape-count))
+(define op1 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v1 (daed:v op1 2))
+(define b-ok (daed:check-true (daed:op-ok? op1)))
+(define b-v (daed:check-rel v1 want 1e-6 1e-9))
+(define b-match (daed:check-rel v1 v0 1e-9 1e-12))
+(define b-esc (daed:check-true (> (daed:escape-count) e1)))
+(define b-calls (daed:check-true (>= (daed:native-calls) 1)))
+
+(display "B native v2=")
+(display v1)
+(display " escapes=")
+(display (daed:escape-count))
+(display " calls=")
+(display (daed:native-calls))
+(newline)
+
+; ── C. Poison → fallback ──
+(define snap (daed:snapshot-sim ckt "pre-poison" op1))
+(define poi (daed:native-set-fail! #t))
+(define c-poi (daed:check-true poi))
+(define op2 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2 (daed:v op2 2))
+(define c-ok (daed:check-true (daed:op-ok? op2)))
+(define c-v (daed:check-rel v2 want 1e-6 1e-9))
+(define c-back (daed:check-true (equal? (daed:solve-backend) "pure")))
+(define rst (daed:restore! ckt snap))
+(define op3 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define c-rst (daed:check-true (and rst (daed:op-ok? op3))))
+(define c-rv (daed:check-rel (daed:v op3 2) want 1e-6 1e-9))
+(define r2-ok (daed:check-approx
+                (daed:comp-value (daed:find-comp ckt "r2")) 2e3 1e-9))
+
+(display "C fallback backend=")
+(display (daed:solve-backend))
+(display " v2=")
+(display v2)
+(display " restored=")
+(display (daed:v op3 2))
+(newline)
+
+; ── D. Rebind back to native then pure ──
+(define rb2 (daed:solve-rebind! "pure"))
+(define d-pure (daed:check-true (and (daed:solve-rebind-ok? rb2)
+                                     (equal? (daed:solve-backend) "pure"))))
+(define e-final (daed:escape-count))
+
+(define escapes-ok (daed:check-true (>= e-final 1)))
+(define all-ok
+  (and ver-ok ready-ok
+       a-ok a-v a-e
+       b-rb b-ok b-v b-match b-esc b-calls
+       c-poi c-ok c-v c-back c-rst c-rv r2-ok
+       d-pure escapes-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (equal? (daed:solve-backend) "pure")))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: native GE hot-swap + fallback (escapes=")
+    (display e-final)
+    (display ")")
+    (newline)
+    (display "RESULT pass example=26-native-hotswap escapes=")
+    (display e-final)
+    (newline))
+  (begin
+    (display "FAIL: native-hotswap denseness probe")
+    (newline)
+    (display "RESULT fail example=26-native-hotswap")
+    (newline)
+    (display "  ready=")
+    (display ready)
+    (display " a-v=")
+    (display a-v)
+    (display " b-rb=")
+    (display b-rb)
+    (display " b-v=")
+    (display b-v)
+    (display " b-esc=")
+    (display b-esc)
+    (display " c-back=")
+    (display c-back)
+    (display " c-v=")
+    (display c-v)
+    (newline)))

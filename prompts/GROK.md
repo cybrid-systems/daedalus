@@ -58,6 +58,7 @@ Primary objects under test:
 - Probe `23-agent-evolve` — spec-driven agent search, escapes=0 (issue #24)
 - Probe `24-topo-mutate` — topology add/remove/search, escapes=0 (issue #25)
 - Probe `25-spice-export` — FlatAST → SPICE export, escapes=0 (issue #26)
+- Probe `26-native-hotswap` — C++ GE hot-swap + fallback (issue #28); default backend stays pure
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 - Roadmap: M0–M4 done (issue #27). Next is M5 native kernel escape (#28–#34).

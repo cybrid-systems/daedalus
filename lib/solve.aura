@@ -5,13 +5,15 @@
 ; Gaussian elimination with partial pivoting on dense MNA.
 ; Nonlinear circuits use NR (Jacobian + residual) on the same GE kernel.
 ; Linear circuits keep the one-shot path (bit-stable vs Phase 1 probes).
-; Pure Aura; no FFI (escape count 0 on this path).
+; Default backend is pure Aura (escape count 0). Optional native GE
+; (issue #28) is a metered escape, copy-in/out, auto-fallback.
 ;
 ; Post aura#2940: plain (/) is correct on small post-arithmetic floats.
 ; Post aura#2941: scientific literals (1e-12) are accepted.
 
 (export daed:solve-version
         daed:dense-solve!
+        daed:dense-solve-pure!
         daed:newton-solve
         daed:simulate-op
         daed:op-ok?
@@ -43,9 +45,10 @@
 (require "netlist" all:)
 (require "stamp" all:)
 (require "devices" all:)
+(require "native" all:)
 
-; 6 = issue #21 Gmin-step / source-step / ptran / aid chain
-(define daed:solve-version 6)
+; 7 = issue #28 optional native dense-solve backend
+(define daed:solve-version 7)
 
 (define daed:nr-maxiter 50)
 (define daed:nr-atol 1e-8)
@@ -73,8 +76,8 @@
       #t)))
 
 ; In-place dense GE + back-sub. Returns #t on success, #f if singular.
-; Solution overwrites b.
-(define (daed:dense-solve! A b n)
+; Solution overwrites b. Pure Aura (default backend).
+(define (daed:dense-solve-pure! A b n)
   (let ((ok #t)
         (col 0))
     (while (lambda () (and ok (< col n)))
@@ -133,6 +136,16 @@
                     (daed:vec-set! b i (/ s diag)))))
               (set! i (- i 1)))))
         ok))))
+
+; Dispatch: native copy-in/out, fall back to pure on failure (issue #28).
+(define (daed:dense-solve! A b n)
+  (if (equal? (daed:solve-backend) "native")
+    (if (daed:dense-solve-native! A b n)
+      #t
+      (begin
+        (daed:solve-backend-set! "pure")
+        (daed:dense-solve-pure! A b n)))
+    (daed:dense-solve-pure! A b n)))
 
 ; Branch currents from x using the DC (or TRAN) branch map.
 (define (daed:ibranch-from-x x comps dc?)
