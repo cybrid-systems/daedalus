@@ -93,6 +93,12 @@ GE / NR. Fixed-step `simulate-tran` is unchanged.
 No leave from \(V_A\). Shichman-Hodges stamp and Jacobian stay on the dense
 NR + BE path. Parameters are ordinary FlatAST hash fields.
 
+## Issue #20 (.measure + CSV)
+
+No leave from \(V_A\). Crossing / integral queries and CSV string build stay
+on the existing `.tran` series. `write-file` is the same host primitive used
+by viz (not a new numerical escape).
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

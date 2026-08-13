@@ -23,6 +23,7 @@ PROBES=(
   16-nl-op-suite
   17-adapt-tran
   18-mosfet
+  19-measure
 )
 
 pass=0

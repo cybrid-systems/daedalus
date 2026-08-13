@@ -51,6 +51,7 @@ Primary objects under test:
 - Probe `16-nl-op-suite` — nonlinear `.op` vs frozen ngspice refs, escapes=0 (issue #17)
 - Probe `17-adapt-tran` — LTE adaptive BE `.tran`, escapes=0 (issue #18)
 - Probe `18-mosfet` — Level-1 NMOS inverter / CS / adapt `.tran`, escapes=0 (issue #19)
+- Probe `19-measure` — `.measure` + CSV waveform export, escapes=0 (issue #20)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 

@@ -69,6 +69,13 @@
         ; probe
         daed:probe-version daed:v daed:i daed:v-ground
         daed:check-voltage
+        ; measure (issue #20)
+        daed:measure-version
+        daed:meas-ok? daed:meas-value daed:meas-t daed:meas-t2 daed:meas-kind
+        daed:measure-max daed:measure-min daed:measure-avg daed:measure-rms
+        daed:measure-final daed:measure-when daed:measure-delay
+        daed:measure-risetime daed:measure-summary
+        daed:tran->csv daed:write-tran-csv!
         ; mutate (Phase 3)
         daed:mutate-version
         daed:find-comp daed:clone-comp daed:clone-circuit
@@ -122,6 +129,7 @@
 (require "solve" all:)
 (require "tran" all:)
 (require "probe" all:)
+(require "measure" all:)
 (require "mutate-circuit" all:)
 (require "agent" all:)
 (require "viz" all:)

@@ -277,6 +277,12 @@ Level-1 NMOS ([issue #19](https://github.com/cybrid-systems/daedalus/issues/19))
 ./scripts/run-aura.sh examples/18-mosfet/main.aura
 ```
 
+`.measure` + CSV export ([issue #20](https://github.com/cybrid-systems/daedalus/issues/20)):
+
+```bash
+./scripts/run-aura.sh examples/19-measure/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

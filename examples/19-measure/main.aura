@@ -1,0 +1,175 @@
+; examples/19-measure/main.aura
+;
+; Milestone 2 / issue #20 — .measure + waveform CSV export.
+;   RC step: Vin=5, R=1k, C=1µF, τ=1ms, tstop=5τ, dt=τ/100
+;   MAX / MIN / AVG / RMS / WHEN / TRIG-TARG rise / final
+;   CSV written for an external plotter / Aether
+;
+; Axes: measure:* + tran series + write-file
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/19-measure/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 19-measure: .measure + CSV ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " measure=")
+(display daed:measure-version)
+(display " tran=")
+(display daed:tran-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:measure-version)
+                                     (>= daed:measure-version 1))))
+
+(define Vin 5.0)
+(define Rval 1e3)
+(define Cval 1e-6)
+(define tau (* Rval Cval))
+(define tstop (* 5.0 tau))
+(define dt (/ tau 100.0))
+
+(define ckt
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval))))
+
+(define tr (daed:simulate-tran ckt dt (daed:nsteps-for tstop dt)))
+(daed:stats-bump! "sim_runs")
+(define tr-ok (daed:check-true (daed:tran-ok? tr)))
+
+(define want-end (* Vin (- 1.0 (exp -5.0))))
+(define want-t50 (* tau 0.693147))
+(define want-tr (* tau 2.197225))
+(define want-avg (* Vin (- 1.0 (* 0.2 (- 1.0 (exp -5.0))))))
+
+(define m-fin (daed:measure-final tr 2))
+(define m-max (daed:measure-max tr 2))
+(define m-min (daed:measure-min tr 2))
+(define m-avg (daed:measure-avg tr 2))
+(define m-rms (daed:measure-rms tr 2))
+(define m-when (daed:measure-when tr 2 (* 0.5 Vin)))
+(define m-rise (daed:measure-risetime tr 2))
+(define m-del (daed:measure-delay tr 2 (* 0.1 Vin) (* 0.9 Vin)))
+(define sum (daed:measure-summary tr 2))
+
+(define fin-ok (daed:check-true (daed:meas-ok? m-fin)))
+(define fin-v (daed:check-rel (daed:meas-value m-fin) want-end 0.02 1e-6))
+(define max-ok (daed:check-true (and (daed:meas-ok? m-max)
+                                    (>= (daed:meas-value m-max)
+                                        (daed:meas-value m-fin)))))
+(define min-ok (daed:check-approx (daed:meas-value m-min) 0.0 1e-9))
+(define avg-ok (daed:check-rel (daed:meas-value m-avg) want-avg 0.05 1e-6))
+(define rms-ok (daed:check-true (and (daed:meas-ok? m-rms)
+                                    (> (daed:meas-value m-rms)
+                                       (daed:meas-value m-avg)))))
+(define when-ok (daed:check-rel (daed:meas-t m-when) want-t50 0.05 1e-9))
+(define rise-ok (daed:check-rel (daed:meas-value m-rise) want-tr 0.08 1e-9))
+(define del-ok (daed:check-rel (daed:meas-value m-del) want-tr 0.08 1e-9))
+(define sum-ok (daed:check-true (and (hash-ref sum "ok" #f)
+                                    (number? (hash-ref sum "final" #f))
+                                    (number? (hash-ref sum "trise" #f)))))
+
+(display "final=")
+(display (daed:meas-value m-fin))
+(display " want=")
+(display want-end)
+(display " max=")
+(display (daed:meas-value m-max))
+(display " min=")
+(display (daed:meas-value m-min))
+(newline)
+(display "avg=")
+(display (daed:meas-value m-avg))
+(display " want=")
+(display want-avg)
+(display " rms=")
+(display (daed:meas-value m-rms))
+(newline)
+(display "WHEN 2.5V t=")
+(display (daed:meas-t m-when))
+(display " want=")
+(display want-t50)
+(display " trise=")
+(display (daed:meas-value m-rise))
+(display " want=")
+(display want-tr)
+(newline)
+
+(define csv (daed:tran->csv tr))
+(define csv-head (daed:check-true (and (string? csv)
+                                       (daed:string-has? csv "t,v1,v2"))))
+(define csv-has-t0 (daed:check-true (daed:string-has? csv "0")))
+(define nbytes (daed:write-tran-csv! tr "examples/19-measure/out/rc.csv"))
+(define wrote-ok (daed:check-true (and (number? nbytes) (> nbytes 0))))
+(define csv-body (daed:check-true (and (string? csv)
+                                      (> (string-length csv) 20)
+                                      (daed:string-has? csv ","))))
+
+(display "csv bytes=")
+(display nbytes)
+(display " len=")
+(display (string-length csv))
+(newline)
+
+; Adaptive path: WHEN still near τ ln 2
+(define tr-ad (daed:simulate-tran-adapt ckt tstop (/ tau 20.0)))
+(daed:stats-bump! "sim_runs")
+(define ad-when (daed:measure-when tr-ad 2 (* 0.5 Vin)))
+(define ad-ok (daed:check-true (daed:tran-ok? tr-ad)))
+(define ad-t (daed:check-rel (daed:meas-t ad-when) want-t50 0.08 1e-9))
+
+(display "adapt WHEN t=")
+(display (daed:meas-t ad-when))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok tr-ok
+       fin-ok fin-v max-ok min-ok avg-ok rms-ok
+       when-ok rise-ok del-ok sum-ok
+       csv-head csv-has-t0 csv-body wrote-ok
+       ad-ok ad-t
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 2)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: .measure + CSV export (escapes=0)")
+    (newline)
+    (display "RESULT pass example=19-measure escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: measure denseness probe")
+    (newline)
+    (display "RESULT fail example=19-measure")
+    (newline)
+    (display "  fin-v=")
+    (display fin-v)
+    (display " avg-ok=")
+    (display avg-ok)
+    (display " when-ok=")
+    (display when-ok)
+    (display " rise-ok=")
+    (display rise-ok)
+    (display " csv-head=")
+    (display csv-head)
+    (display " wrote-ok=")
+    (display wrote-ok)
+    (display " ad-t=")
+    (display ad-t)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))
