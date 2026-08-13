@@ -3,7 +3,8 @@
 ; (require "netlist" all:)
 ;
 ; FlatAST-friendly hashes + component lists. Node 0 is GND.
-; Components: R, C, L, independent V / I, diode D, BJT Q (NPN).
+; Components: R, C, L, independent V / I, diode D, BJT Q (NPN),
+; controlled sources E (VCVS), G (VCCS), F (CCCS), H (CCVS).
 
 (export daed:netlist-version
         daed:comp
@@ -16,6 +17,10 @@
         daed:D*
         daed:Q
         daed:Q*
+        daed:E
+        daed:G
+        daed:F
+        daed:H
         daed:circuit
         daed:ckt-name
         daed:ckt-comps
@@ -24,14 +29,24 @@
         daed:comp-n1
         daed:comp-n2
         daed:comp-n3
+        daed:comp-n4
         daed:comp-nc
         daed:comp-nb
         daed:comp-ne
+        daed:comp-nc+
+        daed:comp-nc-
+        daed:comp-ctrl
+        daed:comp-terminals
         daed:comp-value
         daed:comp-set-value!
         daed:comp-set-n1!
         daed:comp-set-n2!
         daed:comp-set-n3!
+        daed:comp-set-n4!
+        daed:query-comp
+        daed:query-by-type
+        daed:query-nodes
+        daed:query-names
         daed:comp-param
         daed:comp-set-param!
         daed:has-nonlinear?
@@ -43,7 +58,7 @@
         daed:set-node-voltage!
         daed:x-v)
 
-(define daed:netlist-version 3)
+(define daed:netlist-version 4)
 
 ; Default Shockley / Ebers-Moll parameters (educational Si).
 (define daed:default-is 1e-14)
@@ -55,7 +70,7 @@
 (define daed:default-q-is 1e-15)
 
 ; ── Component constructors ──
-; type: "R" | "C" | "L" | "V" | "I" | "D" | "Q"
+; type: "R" | "C" | "L" | "V" | "I" | "D" | "Q" | "E" | "G" | "F" | "H"
 ; n1, n2: integer node ids (0 = GND)
 ; Q uses n3 = emitter; n1 = collector, n2 = base
 ; value: ohms | farads | henries | volts | amps | Is (D/Q)
@@ -108,6 +123,32 @@
 (define (daed:Q name nc nb ne)
   (daed:Q* name nc nb ne daed:default-q-is daed:default-bf daed:default-br daed:default-vt))
 
+; VCVS E: v(n1,n2) = mu * v(nc+,nc-). value = mu.
+(define (daed:E name n1 n2 nc+ nc- mu)
+  (let ((h (daed:comp "E" name n1 n2 mu)))
+    (hash-set! h "n3" nc+)
+    (hash-set! h "n4" nc-)
+    h))
+
+; VCCS G: i(n1→n2) = gm * v(nc+,nc-). value = gm.
+(define (daed:G name n1 n2 nc+ nc- gm)
+  (let ((h (daed:comp "G" name n1 n2 gm)))
+    (hash-set! h "n3" nc+)
+    (hash-set! h "n4" nc-)
+    h))
+
+; CCCS F: i(n1→n2) = beta * i(ctrl). ctrl names a V/E/H branch.
+(define (daed:F name n1 n2 ctrl beta)
+  (let ((h (daed:comp "F" name n1 n2 beta)))
+    (hash-set! h "ctrl" ctrl)
+    h))
+
+; CCVS H: v(n1,n2) = rm * i(ctrl). ctrl names a V/E/H branch.
+(define (daed:H name n1 n2 ctrl rm)
+  (let ((h (daed:comp "H" name n1 n2 rm)))
+    (hash-set! h "ctrl" ctrl)
+    h))
+
 (define (daed:circuit name comps)
   (let ((h (hash)))
     (hash-set! h "name" name)
@@ -135,6 +176,12 @@
 (define (daed:comp-n3 c)
   (hash-ref c "n3" 0))
 
+(define (daed:comp-n4 c)
+  (hash-ref c "n4" 0))
+
+(define (daed:comp-ctrl c)
+  (hash-ref c "ctrl" ""))
+
 (define (daed:comp-nc c)
   (daed:comp-n1 c))
 
@@ -143,6 +190,28 @@
 
 (define (daed:comp-ne c)
   (daed:comp-n3 c))
+
+(define (daed:comp-nc+ c)
+  (daed:comp-n3 c))
+
+(define (daed:comp-nc- c)
+  (daed:comp-n4 c))
+
+(define (daed:comp-set-n4! c n)
+  (hash-set! c "n4" n)
+  c)
+
+; Terminal node list for inspection / topology.
+(define (daed:comp-terminals c)
+  (let ((ty (daed:comp-type c))
+        (acc (list (daed:comp-n1 c) (daed:comp-n2 c))))
+    (if (equal? ty "Q")
+      (set! acc (cons (daed:comp-n3 c) acc))
+      0)
+    (if (or (equal? ty "E") (equal? ty "G"))
+      (set! acc (cons (daed:comp-n4 c) (cons (daed:comp-n3 c) acc)))
+      0)
+    acc))
 
 (define (daed:comp-value c)
   (hash-ref c "value" 0))
@@ -174,7 +243,7 @@
   (or (> (daed:count-type comps "D") 0)
       (> (daed:count-type comps "Q") 0)))
 
-; Highest node id appearing in the netlist (includes BJT emitter).
+; Highest node id appearing in the netlist (includes BJT emitter / E,G sense).
 (define (daed:max-node comps)
   (let ((m 0))
     (let loop ((cs comps))
@@ -184,10 +253,12 @@
           (let ((c (car cs)))
             (let ((n1 (daed:comp-n1 c))
                   (n2 (daed:comp-n2 c))
-                  (n3 (daed:comp-n3 c)))
+                  (n3 (daed:comp-n3 c))
+                  (n4 (daed:comp-n4 c)))
               (if (and (number? n1) (> n1 m)) (set! m n1) 0)
               (if (and (number? n2) (> n2 m)) (set! m n2) 0)
-              (if (and (number? n3) (> n3 m)) (set! m n3) 0)))
+              (if (and (number? n3) (> n3 m)) (set! m n3) 0)
+              (if (and (number? n4) (> n4 m)) (set! m n4) 0)))
           (loop (cdr cs)))))))
 
 (define (daed:count-type comps type)
@@ -233,3 +304,59 @@
       (if (or (< i 0) (>= i (vector-length x)))
         0.0
         (vector-ref x i)))))
+
+; ── Query (circuit-domain; host query:* is a different surface) ──
+
+(define (daed:query-comp ckt name)
+  (let loop ((cs (daed:ckt-comps ckt)))
+    (if (null? cs)
+      #f
+      (if (equal? (daed:comp-name (car cs)) name)
+        (car cs)
+        (loop (cdr cs))))))
+
+(define (daed:query-by-type ckt type)
+  (let ((acc '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        (reverse acc)
+        (begin
+          (if (equal? (daed:comp-type (car cs)) type)
+            (set! acc (cons (car cs) acc))
+            0)
+          (loop (cdr cs)))))))
+
+(define (daed:query-names ckt)
+  (let ((acc '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        (reverse acc)
+        (begin
+          (set! acc (cons (daed:comp-name (car cs)) acc))
+          (loop (cdr cs)))))))
+
+(define (daed:query-nodes ckt)
+  (let ((acc '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        acc
+        (begin
+          (let ((ts (daed:comp-terminals (car cs))))
+            (let tloop ((xs ts))
+              (if (null? xs)
+                0
+                (begin
+                  (let ((n (car xs)))
+                    (if (and (number? n) (not (daed:mem-num-q? n acc)))
+                      (set! acc (cons n acc))
+                      0))
+                  (tloop (cdr xs))))))
+          (loop (cdr cs)))))))
+
+(define (daed:mem-num-q? n xs)
+  (let loop ((ys xs))
+    (if (null? ys)
+      #f
+      (if (equal? (car ys) n)
+        #t
+        (loop (cdr ys))))))

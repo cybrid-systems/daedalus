@@ -10,6 +10,8 @@
 (export daed:stamp-version
         daed:mna-size
         daed:mna-size-tran
+        daed:needs-branch?
+        daed:branch-map
         daed:stamp-system
         daed:stamp-system-tran
         daed:mat-ref
@@ -23,18 +25,48 @@
 
 (require "netlist" all:)
 
-(define daed:stamp-version 2)
+(define daed:stamp-version 3)
 
-; DC system size: node voltages + V sources + L (treated as 0 V).
+; Voltage-defined branch unknown: V, E, H; L only in DC (short).
+(define (daed:needs-branch? ty dc?)
+  (or (equal? ty "V")
+      (equal? ty "E")
+      (equal? ty "H")
+      (and dc? (equal? ty "L"))))
+
+(define (daed:count-branches comps dc?)
+  (let ((n 0))
+    (let loop ((cs comps))
+      (if (null? cs)
+        n
+        (begin
+          (if (daed:needs-branch? (daed:comp-type (car cs)) dc?)
+            (set! n (+ n 1))
+            0)
+          (loop (cdr cs)))))))
+
+; name → MNA branch index (after voltage unknowns).
+(define (daed:branch-map comps dc?)
+  (let ((h (hash))
+        (idx (daed:n-voltage-unknowns comps)))
+    (let loop ((cs comps))
+      (if (null? cs)
+        h
+        (begin
+          (if (daed:needs-branch? (daed:comp-type (car cs)) dc?)
+            (begin
+              (hash-set! h (daed:comp-name (car cs)) idx)
+              (set! idx (+ idx 1)))
+            0)
+          (loop (cdr cs)))))))
+
 (define (daed:mna-size comps)
   (+ (daed:n-voltage-unknowns comps)
-     (daed:count-type comps "V")
-     (daed:count-type comps "L")))
+     (daed:count-branches comps #t)))
 
-; TRAN system size: node voltages + V sources only (C/L are companion G).
 (define (daed:mna-size-tran comps)
   (+ (daed:n-voltage-unknowns comps)
-     (daed:count-type comps "V")))
+     (daed:count-branches comps #f)))
 
 (define (daed:mat-ref A n i j)
   (vector-ref A (+ (* i n) j)))
@@ -107,6 +139,60 @@
     (daed:vec-add! b vs-idx val)
     #t))
 
+; A[row-node, col-node] += coef (skip GND).
+(define (daed:stamp-term! A n row-node col-node coef)
+  (let ((i (daed:node-index row-node))
+        (j (daed:node-index col-node)))
+    (if (and (>= i 0) (>= j 0))
+      (daed:mat-add! A n i j coef)
+      0)))
+
+; VCCS: i(n1→n2) = gm * (v_c+ − v_c−)
+(define (daed:stamp-vccs! A n n1 n2 nc+ nc- gm)
+  (if (not (number? gm))
+    #f
+    (begin
+      (daed:stamp-term! A n n1 nc+ gm)
+      (daed:stamp-term! A n n1 nc- (* -1.0 gm))
+      (daed:stamp-term! A n n2 nc+ (* -1.0 gm))
+      (daed:stamp-term! A n n2 nc- gm)
+      #t)))
+
+; VCVS: v(n1,n2) − mu*(v_c+ − v_c−) = 0
+(define (daed:stamp-vcvs! A b n n1 n2 nc+ nc- mu k)
+  (daed:stamp-V! A b n n1 n2 0.0 k)
+  (let ((jc+ (daed:node-index nc+))
+        (jc- (daed:node-index nc-)))
+    (if (and (number? mu) (>= jc+ 0))
+      (daed:mat-add! A n k jc+ (* -1.0 mu))
+      0)
+    (if (and (number? mu) (>= jc- 0))
+      (daed:mat-add! A n k jc- mu)
+      0)
+    #t))
+
+; CCCS: i(n1→n2) = beta * i_ctrl
+(define (daed:stamp-cccs! A n n1 n2 beta k-ctrl)
+  (if (or (not (number? beta)) (not (number? k-ctrl)))
+    #f
+    (let ((i1 (daed:node-index n1))
+          (i2 (daed:node-index n2)))
+      (if (>= i1 0)
+        (daed:mat-add! A n i1 k-ctrl beta)
+        0)
+      (if (>= i2 0)
+        (daed:mat-add! A n i2 k-ctrl (* -1.0 beta))
+        0)
+      #t)))
+
+; CCVS: v(n1,n2) − rm * i_ctrl = 0
+(define (daed:stamp-ccvs! A b n n1 n2 rm k k-ctrl)
+  (daed:stamp-V! A b n n1 n2 0.0 k)
+  (if (and (number? rm) (number? k-ctrl))
+    (daed:mat-add! A n k k-ctrl (* -1.0 rm))
+    0)
+  #t)
+
 ; Inject branch current contribution on RHS: +Ieq at n1, -Ieq at n2
 ; (for capacitor companion Geq*v_old).
 (define (daed:stamp-ieq! b n1 n2 Ieq)
@@ -124,107 +210,99 @@
 ; C open (skip). L short as 0 V voltage branch.
 (define (daed:stamp-system comps)
   (let ((n-v (daed:n-voltage-unknowns comps))
-        (n-vs (daed:count-type comps "V"))
-        (n-L (daed:count-type comps "L")))
-    (let ((N (+ n-v n-vs n-L)))
-      (if (<= N 0)
-        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
-        (let ((A (make-vector (* N N) 0.0))
-              (b (make-vector N 0.0))
-              (vs-next n-v))
-          (let loop ((cs comps))
-            (if (null? cs)
-              (list N A b n-v)
-              (begin
-                (let ((c (car cs)))
-                  (let ((ty (daed:comp-type c)))
-                    (cond
-                      ((equal? ty "R")
-                       (daed:stamp-R! A N
-                                      (daed:comp-n1 c)
-                                      (daed:comp-n2 c)
-                                      (daed:comp-value c)))
-                      ((equal? ty "V")
-                       (begin
-                         (daed:stamp-V! A b N
-                                        (daed:comp-n1 c)
-                                        (daed:comp-n2 c)
-                                        (daed:comp-value c)
-                                        vs-next)
-                         (set! vs-next (+ vs-next 1))))
-                      ((equal? ty "I")
-                       (daed:stamp-I! b N
-                                      (daed:comp-n1 c)
-                                      (daed:comp-n2 c)
-                                      (daed:comp-value c)))
-                      ((equal? ty "L")
-                       ; DC short: 0 V between terminals
-                       (begin
-                         (daed:stamp-V! A b N
-                                        (daed:comp-n1 c)
-                                        (daed:comp-n2 c)
-                                        0.0
-                                        vs-next)
-                         (set! vs-next (+ vs-next 1))))
-                      ((equal? ty "C")
-                       ; DC open
-                       0)
-                      (else 0))))
-                (loop (cdr cs))))))))))
+        (br (daed:branch-map comps #t))
+        (N (daed:mna-size comps)))
+    (if (<= N 0)
+      (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+      (let ((A (make-vector (* N N) 0.0))
+            (b (make-vector N 0.0)))
+        (let loop ((cs comps))
+          (if (null? cs)
+            (list N A b n-v)
+            (begin
+              (daed:stamp-one! A b N (car cs) br #t)
+              (loop (cdr cs)))))))))
+
+(define (daed:stamp-one! A b N c br dc?)
+  (let ((ty (daed:comp-type c))
+        (n1 (daed:comp-n1 c))
+        (n2 (daed:comp-n2 c))
+        (val (daed:comp-value c))
+        (nm (daed:comp-name c)))
+    (cond
+      ((equal? ty "R")
+       (daed:stamp-R! A N n1 n2 val))
+      ((equal? ty "V")
+       (daed:stamp-V! A b N n1 n2 val (hash-ref br nm 0)))
+      ((equal? ty "I")
+       (daed:stamp-I! b N n1 n2 val))
+      ((and dc? (equal? ty "L"))
+       (daed:stamp-V! A b N n1 n2 0.0 (hash-ref br nm 0)))
+      ((equal? ty "C")
+       0)
+      ((equal? ty "E")
+       (daed:stamp-vcvs! A b N n1 n2
+                         (daed:comp-n3 c) (daed:comp-n4 c)
+                         val (hash-ref br nm 0)))
+      ((equal? ty "G")
+       (daed:stamp-vccs! A N n1 n2
+                         (daed:comp-n3 c) (daed:comp-n4 c) val))
+      ((equal? ty "F")
+       (daed:stamp-cccs! A N n1 n2 val
+                         (hash-ref br (daed:comp-ctrl c) #f)))
+      ((equal? ty "H")
+       (daed:stamp-ccvs! A b N n1 n2 val
+                         (hash-ref br nm 0)
+                         (hash-ref br (daed:comp-ctrl c) #f)))
+      (else 0))))
 
 ; ── TRAN stamp (Backward Euler companions) ──
 ; state: hash with "v" (vector by node id) and "iL" (hash name → current)
 (define (daed:stamp-system-tran comps h state)
   (let ((n-v (daed:n-voltage-unknowns comps))
-        (n-vs (daed:count-type comps "V"))
+        (br (daed:branch-map comps #f))
         (vprev (hash-ref state "v" (make-vector 1 0.0)))
-        (iL (hash-ref state "iL" (hash))))
-    (let ((N (+ n-v n-vs)))
-      (if (or (<= N 0) (not (number? h)) (<= h 0.0))
-        (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
-        (let ((A (make-vector (* N N) 0.0))
-              (b (make-vector N 0.0))
-              (vs-next n-v))
-          (let loop ((cs comps))
-            (if (null? cs)
-              (list N A b n-v)
-              (begin
-                (let ((c (car cs)))
-                  (let ((ty (daed:comp-type c))
-                        (n1 (daed:comp-n1 c))
-                        (n2 (daed:comp-n2 c))
-                        (val (daed:comp-value c)))
-                    (cond
-                      ((equal? ty "R")
-                       (daed:stamp-R! A N n1 n2 val))
-                      ((equal? ty "V")
-                       (begin
-                         (daed:stamp-V! A b N n1 n2 val vs-next)
-                         (set! vs-next (+ vs-next 1))))
-                      ((equal? ty "I")
-                       (daed:stamp-I! b N n1 n2 val))
-                      ((equal? ty "C")
-                       (if (and (number? val) (> val 0.0))
-                         (let ((Geq (/ val h))
-                               (vold (- (daed:node-voltage vprev n1)
-                                        (daed:node-voltage vprev n2))))
-                           (daed:stamp-G! A N n1 n2 Geq)
-                           (daed:stamp-ieq! b n1 n2 (* Geq vold)))
-                         0))
-                      ((equal? ty "L")
-                       (if (and (number? val) (> val 0.0))
-                         (let ((Geq (/ h val))
-                               (iold (hash-ref iL (daed:comp-name c) 0.0)))
-                           (daed:stamp-G! A N n1 n2 Geq)
-                           ; b: -iold at n1, +iold at n2
-                           (let ((i1 (daed:node-index n1))
-                                 (i2 (daed:node-index n2)))
-                             (if (>= i1 0)
-                               (daed:vec-add! b i1 (* -1.0 iold))
-                               0)
-                             (if (>= i2 0)
-                               (daed:vec-add! b i2 iold)
-                               0)))
-                         0))
-                      (else 0))))
-                (loop (cdr cs))))))))))
+        (iL (hash-ref state "iL" (hash)))
+        (N (daed:mna-size-tran comps)))
+    (if (or (<= N 0) (not (number? h)) (<= h 0.0))
+      (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+      (let ((A (make-vector (* N N) 0.0))
+            (b (make-vector N 0.0)))
+        (let loop ((cs comps))
+          (if (null? cs)
+            (list N A b n-v)
+            (begin
+              (let ((c (car cs)))
+                (let ((ty (daed:comp-type c))
+                      (n1 (daed:comp-n1 c))
+                      (n2 (daed:comp-n2 c))
+                      (val (daed:comp-value c)))
+                  (cond
+                    ((or (equal? ty "R") (equal? ty "V") (equal? ty "I")
+                         (equal? ty "E") (equal? ty "G")
+                         (equal? ty "F") (equal? ty "H"))
+                     (daed:stamp-one! A b N c br #f))
+                    ((equal? ty "C")
+                     (if (and (number? val) (> val 0.0))
+                       (let ((Geq (/ val h))
+                             (vold (- (daed:node-voltage vprev n1)
+                                      (daed:node-voltage vprev n2))))
+                         (daed:stamp-G! A N n1 n2 Geq)
+                         (daed:stamp-ieq! b n1 n2 (* Geq vold)))
+                       0))
+                    ((equal? ty "L")
+                     (if (and (number? val) (> val 0.0))
+                       (let ((Geq (/ h val))
+                             (iold (hash-ref iL (daed:comp-name c) 0.0)))
+                         (daed:stamp-G! A N n1 n2 Geq)
+                         (let ((i1 (daed:node-index n1))
+                               (i2 (daed:node-index n2)))
+                           (if (>= i1 0)
+                             (daed:vec-add! b i1 (* -1.0 iold))
+                             0)
+                           (if (>= i2 0)
+                             (daed:vec-add! b i2 iold)
+                             0)))
+                       0))
+                    (else 0))))
+              (loop (cdr cs)))))))))

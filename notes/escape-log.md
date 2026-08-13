@@ -53,6 +53,10 @@ host escape** (xAI or MiniMax multimodal). Probes use fixtures only (`E=0`).
 |------|----------|--------|-----------|--------|-------------------|
 | 2026-08-13 | `scripts/extract-ir.py` | Schematic photo → IR | HTTP VLM (xAI default; MiniMax optional) | Offline probes do not call it | Fixture `from-image`; log every live call |
 
+## Issue #12 (controlled sources)
+
+No leave from \(V_A\). VCVS/VCCS/CCCS/CCVS stamps are pure Aura on the dense MNA kernel.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

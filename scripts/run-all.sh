@@ -15,6 +15,7 @@ PROBES=(
   08-bjt-ce
   09-diode-clamp-tran
   10-vision-pipeline
+  11-controlled-sources
 )
 
 pass=0

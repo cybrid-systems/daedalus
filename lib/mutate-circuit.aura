@@ -39,6 +39,8 @@
 
 (define (daed:copy-model-fields! dst src)
   (hash-set! dst "n3" (hash-ref src "n3" 0))
+  (hash-set! dst "n4" (hash-ref src "n4" 0))
+  (hash-set! dst "ctrl" (hash-ref src "ctrl" ""))
   (hash-set! dst "n" (hash-ref src "n" 1.0))
   (hash-set! dst "vt" (hash-ref src "vt" 0.026))
   (hash-set! dst "bf" (hash-ref src "bf" 100.0))
@@ -117,14 +119,16 @@
       #f
       (let loop ((rest cs) (seen '()))
         (if (null? rest)
-          #t
+          (daed:ctrl-refs-ok? ckt)
           (let ((c (car rest)))
             (let ((name (daed:comp-name c))
                   (type (daed:comp-type c))
                   (n1 (daed:comp-n1 c))
                   (n2 (daed:comp-n2 c))
                   (n3 (daed:comp-n3 c))
-                  (val (daed:comp-value c)))
+                  (n4 (daed:comp-n4 c))
+                  (val (daed:comp-value c))
+                  (ctrl (daed:comp-ctrl c)))
               (if (or (not (string? name))
                       (equal? name "")
                       (daed:name-seen? name seen)
@@ -132,9 +136,31 @@
                       (not (daed:node-ok? n1))
                       (not (daed:node-ok? n2))
                       (and (equal? type "Q") (not (daed:node-ok? n3)))
+                      (and (or (equal? type "E") (equal? type "G"))
+                           (or (not (daed:node-ok? n3))
+                               (not (daed:node-ok? n4))))
+                      (and (or (equal? type "F") (equal? type "H"))
+                           (or (not (string? ctrl)) (equal? ctrl "")))
                       (not (daed:value-ok? type val)))
                 #f
-                (loop (cdr rest) (cons name seen))))))))))
+                (loop (cdr rest) (cons name seen)))))))))))
+
+; F/H must name an existing voltage-defined branch (V, E, or H).
+(define (daed:ctrl-branch-type? ty)
+  (or (equal? ty "V") (equal? ty "E") (equal? ty "H")))
+
+(define (daed:ctrl-refs-ok? ckt)
+  (let loop ((cs (daed:ckt-comps ckt)))
+    (if (null? cs)
+      #t
+      (let ((c (car cs)))
+        (if (or (equal? (daed:comp-type c) "F")
+                (equal? (daed:comp-type c) "H"))
+          (let ((src (daed:find-comp ckt (daed:comp-ctrl c))))
+            (if (and src (daed:ctrl-branch-type? (daed:comp-type src)))
+              (loop (cdr cs))
+              #f))
+          (loop (cdr cs)))))))
 
 ; ── Mutate parameter ──
 ; Returns hash: ok, reason, name, old, new

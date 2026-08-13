@@ -24,6 +24,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 08 | [bjt-ce](08-bjt-ce/) | Ebers-Moll CE / switch `.op` | **PASS** (Phase 5 / issue #2) |
 | 09 | [diode-clamp-tran](09-diode-clamp-tran/) | BE+NR nonlinear `.tran` | **PASS** (Phase 5 / issue #2) |
 | 10 | [vision-pipeline](10-vision-pipeline/) | IR → repair → simulate | **PASS** (issue #6) |
+| 11 | [controlled-sources](11-controlled-sources/) | E/G/F/H stamp + query | **PASS** (issue #12 / M0) |
 
 ## Phase map
 
@@ -37,3 +38,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **viz** | 06 | Bidirectional netlist ↔ HTML (issue #1) |
 | **5** | 07–09 | Shockley diode, Ebers-Moll NPN, Newton-Raphson (issue #2) |
 | **viz-in** | 10 | Image/IR → validate → repair → simulate (issue #6) |
+| **M0** | 11 | Controlled sources E/G/F/H (issue #12) |

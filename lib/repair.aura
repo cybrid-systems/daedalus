@@ -47,6 +47,9 @@
                 0)
               (if (equal? (daed:comp-n3 c) from)
                 (daed:comp-set-n3! c to)
+                0)
+              (if (equal? (daed:comp-n4 c) from)
+                (daed:comp-set-n4! c to)
                 0))
             (loop (cdr cs))))))))
 

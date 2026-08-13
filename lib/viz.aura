@@ -113,7 +113,10 @@
         (if (equal? type "V") "#be123c"
           (if (equal? type "I") "#047857"
             (if (equal? type "D") "#c2410c"
-              (if (equal? type "Q") "#1d4ed8" "#334"))))))))
+              (if (equal? type "Q") "#1d4ed8"
+                (if (or (equal? type "E") (equal? type "G")
+                        (equal? type "F") (equal? type "H"))
+                  "#7c3aed" "#334")))))))))
 
 (define (daed:svg-comp c)
   (let ((n1 (daed:comp-n1 c))

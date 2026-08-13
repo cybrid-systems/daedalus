@@ -8,7 +8,7 @@ Implement a **minimally complete, agent-evolvable SPICE-style circuit simulation
 
 ### Netlist
 - Nodes identified by integer or symbol (0 = GND)
-- Components: at least `R`, `C`, `L`, independent `V` / `I`
+- Components: at least `R`, `C`, `L`, independent `V` / `I`, controlled `E`/`G`/`F`/`H`
 - Representation is a FlatAST-friendly structure that supports `mutate:rebind`, `mutate:splice`, `mutate:replace-subtree`
 - Topological integrity must be preserved across mutations (no dangling nodes)
 
@@ -77,3 +77,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] denseness probe 08 (BJT switch + CE `.op`)
 - [x] denseness probe 09 (diode clamp + BJT switch `.tran`)
 - [x] Vision → IR → repair → simulate (`ir`/`validate`/`repair`/`vision`, probe 10; issue #6)
+- [x] Controlled sources E/G/F/H + query (issue #12, probe 11)

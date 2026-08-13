@@ -20,12 +20,15 @@
         ; netlist
         daed:netlist-version
         daed:comp daed:R daed:C daed:L daed:V daed:I daed:D daed:D* daed:Q daed:Q*
+        daed:E daed:G daed:F daed:H
         daed:circuit
         daed:ckt-name daed:ckt-comps
         daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2 daed:comp-n3
-        daed:comp-nc daed:comp-nb daed:comp-ne
+        daed:comp-n4 daed:comp-nc daed:comp-nb daed:comp-ne
+        daed:comp-nc+ daed:comp-nc- daed:comp-ctrl daed:comp-terminals
         daed:comp-value daed:comp-set-value!
-        daed:comp-set-n1! daed:comp-set-n2! daed:comp-set-n3!
+        daed:comp-set-n1! daed:comp-set-n2! daed:comp-set-n3! daed:comp-set-n4!
+        daed:query-comp daed:query-by-type daed:query-nodes daed:query-names
         daed:comp-param daed:comp-set-param!
         daed:has-nonlinear?
         daed:max-node daed:count-type daed:node-index
@@ -33,6 +36,7 @@
         daed:node-voltage daed:set-node-voltage! daed:x-v
         ; stamp
         daed:stamp-version daed:mna-size daed:mna-size-tran
+        daed:needs-branch? daed:branch-map
         daed:stamp-system daed:stamp-system-tran
         daed:mat-ref daed:mat-set! daed:mat-add!
         daed:vec-ref daed:vec-set! daed:vec-add!
@@ -115,8 +119,8 @@
 (require "repair" all:)
 (require "vision" all:)
 
-; 6 = issue #6 vision → netlist → repair → simulate
-(define daed:min-version 6)
+; 7 = M0 controlled sources E/G/F/H (issue #12)
+(define daed:min-version 7)
 
 (daed:install-builtin-fixtures!)
 

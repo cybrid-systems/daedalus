@@ -23,10 +23,12 @@ whether a circuit is runnable.
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `type` | string | yes | `R` `C` `L` `V` `I` `D` `Q` |
+| `type` | string | yes | `R` `C` `L` `V` `I` `D` `Q` `E` `G` `F` `H` |
 | `name` | string | yes | Unique refdes |
 | `n1` `n2` | int | yes | Terminals (Q: C, B) |
-| `n3` | int | Q only | Emitter |
+| `n3` | int | Q / E / G | Emitter (Q) or control + (E, G) |
+| `n4` | int | E / G | Control − |
+| `ctrl` | string | F / H | Name of V/E/H whose current is sensed |
 | `value` | number / string | yes | SI value or engineering string (`1k`, `2.2uF`) |
 | `unit` | string | no | Hint: `ohm` `F` `H` `V` `A` |
 | `params` | hash | no | `n` `vt` `bf` `br` `gmin` `Is` |

@@ -159,7 +159,8 @@
 
 (define (daed:ir-known-type? ty)
   (or (equal? ty "R") (equal? ty "C") (equal? ty "L")
-      (equal? ty "V") (equal? ty "I") (equal? ty "D") (equal? ty "Q")))
+      (equal? ty "V") (equal? ty "I") (equal? ty "D") (equal? ty "Q")
+      (equal? ty "E") (equal? ty "G") (equal? ty "F") (equal? ty "H")))
 
 (define (daed:ir-comp->comp c)
   (let ((ty (hash-ref c "type" ""))
@@ -185,6 +186,16 @@
         ((equal? ty "Q") (set! out (daed:Q* nm n1 n2 n3
                                            (if (> val 0.0) val 1e-15)
                                            100.0 1.0 0.026)))
+        ((equal? ty "E")
+         (set! out (daed:E nm n1 n2 n3
+                           (daed:node-id (hash-ref c "n4" 0)) val)))
+        ((equal? ty "G")
+         (set! out (daed:G nm n1 n2 n3
+                           (daed:node-id (hash-ref c "n4" 0)) val)))
+        ((equal? ty "F")
+         (set! out (daed:F nm n1 n2 (hash-ref c "ctrl" "") val)))
+        ((equal? ty "H")
+         (set! out (daed:H nm n1 n2 (hash-ref c "ctrl" "") val)))
         (else (set! out #f)))
       (if (and out params)
         (begin
@@ -244,6 +255,16 @@
                                    (daed:comp-value c))))
               (if (equal? (daed:comp-type c) "Q")
                 (hash-set! h "n3" (daed:comp-n3 c))
+                0)
+              (if (or (equal? (daed:comp-type c) "E")
+                      (equal? (daed:comp-type c) "G"))
+                (begin
+                  (hash-set! h "n3" (daed:comp-n3 c))
+                  (hash-set! h "n4" (daed:comp-n4 c)))
+                0)
+              (if (or (equal? (daed:comp-type c) "F")
+                      (equal? (daed:comp-type c) "H"))
+                (hash-set! h "ctrl" (daed:comp-ctrl c))
                 0)
               (set! acc (cons h acc))))
           (loop (cdr cs)))))))

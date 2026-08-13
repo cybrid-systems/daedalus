@@ -5,8 +5,8 @@
 | Module | Phase | Role |
 |--------|-------|------|
 | `daedalus-min.aura` | 0–5 | Facade: version + metrology + re-exports (`daed:*`) |
-| `netlist.aura` | 1–5 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`; node 0 = GND) |
-| `stamp.aura` | 1–2 | MNA stamp: DC + BE companions for `.tran` |
+| `netlist.aura` | 1–5 / M0 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`/`E`/`G`/`F`/`H`) |
+| `stamp.aura` | 1–2 / M0 | MNA stamp: DC + BE + controlled sources |
 | `devices.aura` | 5 | Shockley diode + Ebers-Moll NPN + NR residual/Jacobian |
 | `solve.aura` | 1 / 5 | Dense GE + linear `.op` + Newton-Raphson `.op` |
 | `tran.aura` | 2 / 5 | Fixed-step BE `.tran`; NR per step when D/Q present |

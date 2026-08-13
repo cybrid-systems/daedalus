@@ -1,0 +1,207 @@
+; examples/11-controlled-sources/main.aura
+;
+; Milestone 0 / issue #12 — FlatAST netlist + stamp for controlled sources.
+;   E VCVS  v(out) = mu * v(sense)
+;   G VCCS  i(out) = gm * v(sense)
+;   F CCCS  i(out) = beta * i(ctrl V)
+;   H CCVS  v(out) = rm * i(ctrl V)
+;
+; Axes: netlist ADT + MNA stamp + query + topology
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/11-controlled-sources/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 11-controlled-sources: E/G/F/H FlatAST + stamp ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " netlist=")
+(display daed:netlist-version)
+(display " stamp=")
+(display daed:stamp-version)
+(newline)
+
+; ── 1. Construct + query ──
+(define ckt-all
+  (daed:circuit "all-cs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "rs" 1 0 1e3)
+          (daed:E "e1" 2 0 1 0 2.0)
+          (daed:G "g1" 3 0 1 0 0.001)
+          (daed:F "f1" 4 0 "vin" 2.0)
+          (daed:H "h1" 5 0 "vin" 2e3)
+          (daed:R "re" 2 0 1e3)
+          (daed:R "rg" 3 0 1e3)
+          (daed:R "rf" 4 0 1e3)
+          (daed:R "rh" 5 0 1e3))))
+
+(define topo (daed:check-true (daed:topology-ok? ckt-all)))
+(define qe (daed:query-comp ckt-all "e1"))
+(define qg (daed:query-comp ckt-all "g1"))
+(define qf (daed:query-comp ckt-all "f1"))
+(define qh (daed:query-comp ckt-all "h1"))
+(define q-e (daed:check-true (and qe (equal? (daed:comp-type qe) "E"))))
+(define q-g (daed:check-true (and qg (equal? (daed:comp-type qg) "G"))))
+(define q-f (daed:check-true (and qf (equal? (daed:comp-ctrl qf) "vin"))))
+(define q-h (daed:check-true (and qh (equal? (daed:comp-type qh) "H"))))
+(define n-e (daed:check-eq (length (daed:query-by-type ckt-all "E")) 1))
+(define names (daed:query-names ckt-all))
+(define n-names (daed:check-eq (length names) 10))
+(define nodes (daed:query-nodes ckt-all))
+(define n-nodes (daed:check-true (>= (length nodes) 6)))
+(define sz (daed:mna-size (daed:ckt-comps ckt-all)))
+; nodes 1..5 + branches: V, E, H  → 5 + 3 = 8
+(define sz-ok (daed:check-eq sz 8))
+
+(display "construct topo=")
+(display (daed:topology-ok? ckt-all))
+(display " mna-size=")
+(display sz)
+(display " names=")
+(display (length names))
+(newline)
+
+; ── 2. VCVS: v2 = 2 * v1 = 10 ──
+(define ckt-e
+  (daed:circuit "vcvs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:E "amp" 2 0 1 0 2.0)
+          (daed:R "rl" 2 0 1e3))))
+(define op-e (daed:simulate-op ckt-e))
+(daed:stats-bump! "sim_runs")
+(define e-ok (daed:check-true (daed:op-ok? op-e)))
+(define e-v (daed:check-approx (daed:v op-e 2) 10.0 1e-3))
+
+(display "VCVS ok=")
+(display (daed:op-ok? op-e))
+(display " v2=")
+(display (daed:v op-e 2))
+(display " want=10")
+(newline)
+
+; ── 3. VCCS: i(2→0)=gm*v1, R=1k, gm=0.002 → v2 = -gm*R*v1 = -10 ──
+(define ckt-g
+  (daed:circuit "vccs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:G "gm" 2 0 1 0 0.002)
+          (daed:R "rl" 2 0 1e3))))
+(define op-g (daed:simulate-op ckt-g))
+(daed:stats-bump! "sim_runs")
+(define g-ok (daed:check-true (daed:op-ok? op-g)))
+(define g-v (daed:check-approx (daed:v op-g 2) -10.0 1e-3))
+
+(display "VCCS ok=")
+(display (daed:op-ok? op-g))
+(display " v2=")
+(display (daed:v op-g 2))
+(display " want=-10")
+(newline)
+
+; ── 4. CCCS: I_vin through V+R=1k is -5mA; F beta=2 → v2 = 10 ──
+(define ckt-f
+  (daed:circuit "cccs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "rs" 1 0 1e3)
+          (daed:F "f1" 2 0 "vin" 2.0)
+          (daed:R "rl" 2 0 1e3))))
+(define op-f (daed:simulate-op ckt-f))
+(daed:stats-bump! "sim_runs")
+(define f-ok (daed:check-true (daed:op-ok? op-f)))
+(define f-v (daed:check-approx (daed:v op-f 2) 10.0 1e-3))
+
+(display "CCCS ok=")
+(display (daed:op-ok? op-f))
+(display " v2=")
+(display (daed:v op-f 2))
+(display " want=10")
+(newline)
+
+; ── 5. CCVS: v2 = rm * i_vin = 2000 * (-0.005) = -10 ──
+(define ckt-h
+  (daed:circuit "ccvs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "rs" 1 0 1e3)
+          (daed:H "h1" 2 0 "vin" 2e3)
+          (daed:R "rl" 2 0 1e3))))
+(define op-h (daed:simulate-op ckt-h))
+(daed:stats-bump! "sim_runs")
+(define h-ok (daed:check-true (daed:op-ok? op-h)))
+(define h-v (daed:check-approx (daed:v op-h 2) -10.0 1e-3))
+
+(display "CCVS ok=")
+(display (daed:op-ok? op-h))
+(display " v2=")
+(display (daed:v op-h 2))
+(display " want=-10")
+(newline)
+
+; ── 6. Divider still works; bad F ctrl refused ──
+(define ckt-div
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+(define op-d (daed:simulate-op ckt-div))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-approx (daed:v op-d 2) (/ 10.0 3.0) 1e-3))
+
+(define ckt-bad
+  (daed:circuit "bad-f"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:F "f1" 2 0 "nope" 1.0))))
+(define bad-topo (daed:check-true (not (daed:topology-ok? ckt-bad))))
+
+(define mut (daed:mutate! ckt-e "amp" 3.0))
+(define mut-ok (daed:check-true (daed:mutate-ok? mut)))
+(define op-m (daed:simulate-op ckt-e))
+(daed:stats-bump! "sim_runs")
+(define mut-v (daed:check-approx (daed:v op-m 2) 15.0 1e-3))
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "divider v2=")
+(display (daed:v op-d 2))
+(display " bad-ctrl=")
+(display (not (daed:topology-ok? ckt-bad)))
+(display " mutate mu=3 v2=")
+(display (daed:v op-m 2))
+(newline)
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(define all-ok
+  (and topo q-e q-g q-f q-h n-e n-names n-nodes sz-ok
+       e-ok e-v g-ok g-v f-ok f-v h-ok h-v
+       d-ok bad-topo mut-ok mut-v esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(if all-ok
+  (begin
+    (display "PASS: controlled sources E/G/F/H (escapes=0)")
+    (newline)
+    (display "RESULT pass example=11-controlled-sources escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: controlled-source denseness probe")
+    (newline)
+    (display "RESULT fail example=11-controlled-sources")
+    (newline)
+    (display "  e-ok=")
+    (display e-ok)
+    (display " e-v=")
+    (display e-v)
+    (display " g-v=")
+    (display g-v)
+    (display " f-v=")
+    (display f-v)
+    (display " h-v=")
+    (display h-v)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

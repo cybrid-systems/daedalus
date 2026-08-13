@@ -228,6 +228,12 @@ Vision → netlist → repair → simulate ([issue #6](https://github.com/cybrid
 ./scripts/from-image.sh examples/10-vision-pipeline/fixtures/divider.svg
 ```
 
+Controlled sources VCVS/VCCS/CCCS/CCVS ([issue #12](https://github.com/cybrid-systems/daedalus/issues/12)):
+
+```bash
+./scripts/run-aura.sh examples/11-controlled-sources/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a
