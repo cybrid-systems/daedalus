@@ -87,6 +87,14 @@
         daed:sweep-ok? daed:sweep-n daed:sweep-values daed:sweep-v
         daed:sweep-vend daed:sweep-best daed:sweep-waves
         daed:sweep-v1 daed:sweep-v2
+        ; monte carlo (issue #23)
+        daed:mc-version
+        daed:rng-seed! daed:rng-state daed:rng-u01
+        daed:rng-uniform daed:rng-gauss
+        daed:dist-uniform daed:dist-gauss daed:dist-rel daed:dist-sample
+        daed:mc-spec daed:mc-op daed:mc-tran
+        daed:mc-ok? daed:mc-n daed:mc-mean daed:mc-std daed:mc-min daed:mc-max
+        daed:mc-values daed:mc-trials daed:mc-trial daed:mc-yield daed:mc-robust?
         ; mutate (Phase 3)
         daed:mutate-version
         daed:find-comp daed:clone-comp daed:clone-circuit
@@ -142,6 +150,7 @@
 (require "probe" all:)
 (require "measure" all:)
 (require "step" all:)
+(require "mc" all:)
 (require "mutate-circuit" all:)
 (require "agent" all:)
 (require "viz" all:)

@@ -109,6 +109,12 @@ the existing dense NR / GE kernel. Cold `simulate-op` is unchanged.
 No leave from \(V_A\). Sweeps mutate-and-restore on the existing circuit
 snapshot. Temperature scaling is applied inside the D/Q/M stamp.
 
+## Issue #23 (Monte Carlo)
+
+No leave from \(V_A\). Park-Miller + polar gauss and trial loops stay on
+the existing mutate / `.op` / `.tran` / `.measure` path. Seeded, so probes
+are deterministic.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

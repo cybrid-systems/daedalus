@@ -295,6 +295,12 @@ Parameter `.step` + temperature ([issue #22](https://github.com/cybrid-systems/d
 ./scripts/run-aura.sh examples/21-step-temp/main.aura
 ```
 
+Monte Carlo + yield ([issue #23](https://github.com/cybrid-systems/daedalus/issues/23)):
+
+```bash
+./scripts/run-aura.sh examples/22-monte-carlo/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

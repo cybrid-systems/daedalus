@@ -54,6 +54,7 @@ Primary objects under test:
 - Probe `19-measure` — `.measure` + CSV waveform export, escapes=0 (issue #20)
 - Probe `20-converge-aids` — Gmin / source / ptran fallbacks, escapes=0 (issue #21)
 - Probe `21-step-temp` — `.step` + temperature sweep, escapes=0 (issue #22)
+- Probe `22-monte-carlo` — Monte Carlo + yield, escapes=0 (issue #23)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 

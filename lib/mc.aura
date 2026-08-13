@@ -1,0 +1,379 @@
+; lib/mc.aura — Monte Carlo (issue #23 / M3)
+;
+; (require "mc" all:)
+;
+; Seeded Park-Miller PRNG, uniform / gaussian draws, N-trial .op / .tran
+; sweeps. Snap+restore after each run. Summary + per-trial records for
+; agents. Yield / robust? decide whether a spec is met often enough.
+
+(export daed:mc-version
+        daed:rng-seed!
+        daed:rng-state
+        daed:rng-u01
+        daed:rng-uniform
+        daed:rng-gauss
+        daed:dist-uniform
+        daed:dist-gauss
+        daed:dist-rel
+        daed:dist-sample
+        daed:mc-spec
+        daed:mc-op
+        daed:mc-tran
+        daed:mc-ok?
+        daed:mc-n
+        daed:mc-mean
+        daed:mc-std
+        daed:mc-min
+        daed:mc-max
+        daed:mc-values
+        daed:mc-trials
+        daed:mc-trial
+        daed:mc-yield
+        daed:mc-robust?)
+
+(require "netlist" all:)
+(require "solve" all:)
+(require "tran" all:)
+(require "probe" all:)
+(require "measure" all:)
+(require "mutate-circuit" all:)
+
+(define daed:mc-version 1)
+
+; Park-Miller minstd (a=16807, m=2^31-1) via Schrage — exact in IEEE double.
+(define *daed-rng* 1)
+(define *daed-gauss-spare* 0.0)
+(define *daed-gauss-has* #f)
+
+(define (daed:rng-seed! s)
+  (let ((n 1))
+    (if (number? s)
+      (set! n (inexact->exact (floor (abs s))))
+      0)
+    (if (< n 1)
+      (set! n 1)
+      0)
+    (if (>= n 2147483647)
+      (set! n 1)
+      0)
+    (set! *daed-rng* n)
+    (set! *daed-gauss-has* #f)
+    n))
+
+(define (daed:rng-state)
+  *daed-rng*)
+
+(define (daed:rng-next)
+  (let* ((seed *daed-rng*)
+         (hi (inexact->exact (floor (/ seed 127773.0))))
+         (lo (- seed (* hi 127773)))
+         (next (- (* 16807 lo) (* 2836 hi))))
+    (if (<= next 0)
+      (set! next (+ next 2147483647))
+      0)
+    (set! *daed-rng* next)
+    next))
+
+(define (daed:rng-u01)
+  (/ (daed:rng-next) 2147483647.0))
+
+(define (daed:rng-uniform lo hi)
+  (if (or (not (number? lo)) (not (number? hi)))
+    0.0
+    (+ lo (* (- hi lo) (daed:rng-u01)))))
+
+; Marsaglia polar N(mu, sig^2). Caches the spare sample.
+(define (daed:rng-gauss mu sig)
+  (if (not (and (number? mu) (number? sig)))
+    0.0
+    (if *daed-gauss-has*
+      (begin
+        (set! *daed-gauss-has* #f)
+        (+ mu (* sig *daed-gauss-spare*)))
+      (let ((done #f)
+            (u 0.0)
+            (v 0.0)
+            (s 0.0))
+        (while (lambda () (not done))
+          (lambda ()
+            (set! u (- (* 2.0 (daed:rng-u01)) 1.0))
+            (set! v (- (* 2.0 (daed:rng-u01)) 1.0))
+            (set! s (+ (* u u) (* v v)))
+            (if (and (< s 1.0) (> s 0.0))
+              (set! done #t)
+              0)))
+        (let ((m (sqrt (/ (* -2.0 (log s)) s))))
+          (set! *daed-gauss-spare* (* v m))
+          (set! *daed-gauss-has* #t)
+          (+ mu (* sig (* u m))))))))
+
+(define (daed:dist-uniform lo hi)
+  (let ((h (hash)))
+    (hash-set! h "kind" "uniform")
+    (hash-set! h "a" lo)
+    (hash-set! h "b" hi)
+    h))
+
+(define (daed:dist-gauss mu sig)
+  (let ((h (hash)))
+    (hash-set! h "kind" "gauss")
+    (hash-set! h "a" mu)
+    (hash-set! h "b" sig)
+    h))
+
+; Relative tolerance around nominal. kind = "uniform" | "gauss".
+(define (daed:dist-rel nom rel kind)
+  (if (or (not (number? nom)) (not (number? rel)))
+    (daed:dist-uniform 0.0 0.0)
+    (if (equal? kind "gauss")
+      (daed:dist-gauss nom (* nom rel))
+      (daed:dist-uniform (* nom (- 1.0 rel)) (* nom (+ 1.0 rel))))))
+
+(define (daed:dist-sample d)
+  (if (not d)
+    0.0
+    (let ((kind (hash-ref d "kind" "uniform"))
+          (a (hash-ref d "a" 0.0))
+          (b (hash-ref d "b" 1.0)))
+      (if (equal? kind "gauss")
+        (daed:rng-gauss a b)
+        (daed:rng-uniform a b)))))
+
+(define (daed:mc-spec name key dist)
+  (let ((h (hash)))
+    (hash-set! h "name" name)
+    (hash-set! h "key" key)
+    (hash-set! h "dist" dist)
+    h))
+
+(define (daed:mc-set! ckt name key val)
+  (let ((c (daed:find-comp ckt name)))
+    (if (not c)
+      #f
+      (begin
+        (if (or (not (string? key))
+                (equal? key "")
+                (equal? key "value"))
+          (daed:comp-set-value! c val)
+          (daed:comp-set-param! c key val))
+        #t))))
+
+; Sample every spec and apply. Returns list of draws, or #f.
+(define (daed:mc-apply! ckt specs)
+  (let ((acc '())
+        (ok #t))
+    (let loop ((xs specs))
+      (if (or (not ok) (null? xs))
+        0
+        (let ((sp (car xs)))
+          (let ((name (hash-ref sp "name" ""))
+                (key (hash-ref sp "key" "value"))
+                (d (hash-ref sp "dist" #f)))
+            (let ((val (daed:dist-sample d)))
+              (if (and (number? val) (daed:mc-set! ckt name key val))
+                (set! acc (cons val acc))
+                (set! ok #f))
+              (loop (cdr xs)))))))
+    (if ok
+      (reverse acc)
+      #f)))
+
+(define (daed:list-n xs)
+  (let ((n 0))
+    (let loop ((ys xs))
+      (if (null? ys)
+        n
+        (begin
+          (set! n (+ n 1))
+          (loop (cdr ys)))))))
+
+(define (daed:rev->vec xs)
+  (let ((n (daed:list-n xs))
+        (p xs))
+    (let ((v (make-vector n 0.0))
+          (i (- n 1)))
+      (while (lambda () (>= i 0))
+        (lambda ()
+          (vector-set! v i (car p))
+          (set! p (cdr p))
+          (set! i (- i 1))))
+      v)))
+
+(define (daed:mc-pack ok n node kind vacc tacc)
+  (let ((vals (daed:rev->vec vacc))
+        (trials (daed:rev->vec tacc))
+        (h (hash))
+        (mean 0.0)
+        (mn 0.0)
+        (mx 0.0)
+        (std 0.0)
+        (s 0.0)
+        (i 0))
+    (if (<= n 0)
+      (begin
+        (hash-set! h "ok" #f)
+        (hash-set! h "n" 0)
+        (hash-set! h "node" node)
+        (hash-set! h "kind" kind)
+        (hash-set! h "mean" 0.0)
+        (hash-set! h "std" 0.0)
+        (hash-set! h "min" 0.0)
+        (hash-set! h "max" 0.0)
+        (hash-set! h "values" vals)
+        (hash-set! h "trials" trials)
+        h)
+      (begin
+        (set! mn (vector-ref vals 0))
+        (set! mx (vector-ref vals 0))
+        (set! i 0)
+        (while (lambda () (< i n))
+          (lambda ()
+            (let ((x (vector-ref vals i)))
+              (set! s (+ s x))
+              (if (< x mn) (set! mn x) 0)
+              (if (> x mx) (set! mx x) 0))
+            (set! i (+ i 1))))
+        (set! mean (/ s n))
+        (set! s 0.0)
+        (set! i 0)
+        (while (lambda () (< i n))
+          (lambda ()
+            (let ((d (- (vector-ref vals i) mean)))
+              (set! s (+ s (* d d))))
+            (set! i (+ i 1))))
+        (if (<= n 1)
+          (set! std 0.0)
+          (set! std (sqrt (/ s (- n 1.0)))))
+        (hash-set! h "ok" ok)
+        (hash-set! h "n" n)
+        (hash-set! h "node" node)
+        (hash-set! h "kind" kind)
+        (hash-set! h "mean" mean)
+        (hash-set! h "std" std)
+        (hash-set! h "min" mn)
+        (hash-set! h "max" mx)
+        (hash-set! h "values" vals)
+        (hash-set! h "trials" trials)
+        h))))
+
+(define (daed:mc-op ckt specs ntrials node)
+  (let ((snap (daed:circuit-snapshot ckt))
+        (n (daed:as-int ntrials))
+        (ok #t)
+        (vacc '())
+        (tacc '())
+        (i 0))
+    (if (< n 1)
+      (set! n 0)
+      0)
+    (while (lambda () (< i n))
+      (lambda ()
+        (let ((ps (daed:mc-apply! ckt specs)))
+          (if (not ps)
+            (set! ok #f)
+            (let ((op (daed:simulate-op ckt)))
+              (let ((th (hash)))
+                (hash-set! th "ok" (daed:op-ok? op))
+                (hash-set! th "v" (daed:v op node))
+                (hash-set! th "p" ps)
+                (set! tacc (cons th tacc))
+                (set! vacc (cons (daed:v op node) vacc))
+                (if (not (daed:op-ok? op))
+                  (set! ok #f)
+                  0)))))
+        (set! i (+ i 1))))
+    (daed:restore-circuit! ckt snap)
+    (daed:mc-pack ok n node "op" vacc tacc)))
+
+(define (daed:mc-pick-meas tr node kind)
+  (if (equal? kind "max")
+    (daed:measure-max tr node)
+    (if (equal? kind "min")
+      (daed:measure-min tr node)
+      (if (equal? kind "avg")
+        (daed:measure-avg tr node)
+        (if (equal? kind "rms")
+          (daed:measure-rms tr node)
+          (daed:measure-final tr node))))))
+
+(define (daed:mc-tran ckt specs ntrials dt nsteps node meas-kind)
+  (let ((snap (daed:circuit-snapshot ckt))
+        (n (daed:as-int ntrials))
+        (ok #t)
+        (vacc '())
+        (tacc '())
+        (i 0)
+        (mk (if (string? meas-kind) meas-kind "final")))
+    (if (< n 1)
+      (set! n 0)
+      0)
+    (while (lambda () (< i n))
+      (lambda ()
+        (let ((ps (daed:mc-apply! ckt specs)))
+          (if (not ps)
+            (set! ok #f)
+            (let ((tr (daed:simulate-tran ckt dt nsteps)))
+              (let ((m (daed:mc-pick-meas tr node mk)))
+                (let ((th (hash)))
+                  (hash-set! th "ok" (and (daed:tran-ok? tr) (daed:meas-ok? m)))
+                  (hash-set! th "v" (daed:meas-value m))
+                  (hash-set! th "p" ps)
+                  (set! tacc (cons th tacc))
+                  (set! vacc (cons (daed:meas-value m) vacc))
+                  (if (not (hash-ref th "ok" #f))
+                    (set! ok #f)
+                    0))))))
+        (set! i (+ i 1))))
+    (daed:restore-circuit! ckt snap)
+    (daed:mc-pack ok n node mk vacc tacc)))
+
+(define (daed:mc-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:mc-n r)
+  (hash-ref r "n" 0))
+
+(define (daed:mc-mean r)
+  (hash-ref r "mean" 0.0))
+
+(define (daed:mc-std r)
+  (hash-ref r "std" 0.0))
+
+(define (daed:mc-min r)
+  (hash-ref r "min" 0.0))
+
+(define (daed:mc-max r)
+  (hash-ref r "max" 0.0))
+
+(define (daed:mc-values r)
+  (hash-ref r "values" (make-vector 0 0.0)))
+
+(define (daed:mc-trials r)
+  (hash-ref r "trials" (make-vector 0 #f)))
+
+(define (daed:mc-trial r i)
+  (let ((tv (hash-ref r "trials" (make-vector 0 #f))))
+    (if (and (number? i) (>= i 0) (< i (vector-length tv)))
+      (vector-ref tv i)
+      #f)))
+
+(define (daed:mc-yield r lo hi)
+  (let ((vals (hash-ref r "values" (make-vector 0 0.0))))
+    (let ((n (vector-length vals))
+          (k 0)
+          (i 0))
+      (if (<= n 0)
+        0.0
+        (begin
+          (while (lambda () (< i n))
+            (lambda ()
+              (let ((x (vector-ref vals i)))
+                (if (and (>= x lo) (<= x hi))
+                  (set! k (+ k 1))
+                  0))
+              (set! i (+ i 1))))
+          (/ k n))))))
+
+(define (daed:mc-robust? r lo hi min-y)
+  (and (daed:mc-ok? r)
+       (>= (daed:mc-yield r lo hi) min-y)))

@@ -35,6 +35,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 19 | [measure](19-measure/) | `.measure` + CSV export | **PASS** (issue #20 / M2) |
 | 20 | [converge-aids](20-converge-aids/) | Gmin / source / ptran | **PASS** (issue #21 / M3) |
 | 21 | [step-temp](21-step-temp/) | `.step` + temperature | **PASS** (issue #22 / M3) |
+| 22 | [monte-carlo](22-monte-carlo/) | Monte Carlo + yield | **PASS** (issue #23 / M3) |
 
 ## Phase map
 
@@ -51,4 +52,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **M0** | 11–14 | Netlist, `.op`, `.tran`, mutate/rollback (issues #12–#15) |
 | **M1** | 15–16 | NR helpers + nonlinear `.op` vs ngspice (issues #16–#17) |
 | **M2** | 17–19 | Adaptive `.tran`, MOSFET, `.measure` (issues #18–#20) |
-| **M3** | 20–21 | Convergence aids + `.step` / temperature (issues #21–#22) |
+| **M3** | 20–22 | Convergence aids + `.step` / temperature + Monte Carlo (issues #21–#23) |

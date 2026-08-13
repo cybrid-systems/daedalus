@@ -1,0 +1,210 @@
+; examples/22-monte-carlo/main.aura
+;
+; Milestone 3 / issue #23 — Monte Carlo + yield.
+;   A. Seeded Park-Miller u01 + gauss moments
+;   B. Divider R1/R2 ±5 % uniform → expected v2 spread
+;   C. Same seed reproduces trial 0; circuit restored
+;   D. Agent yield / robust? (wide spec passes, tight fails)
+;   E. RC C ±20 % .tran + measure-final
+;
+; Axes: dist + N-trial .op/.tran + summary + yield
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/22-monte-carlo/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 22-monte-carlo: Monte Carlo + yield ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " mc=")
+(display daed:mc-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:mc-version)
+                                     (>= daed:mc-version 1))))
+
+; ── A. PRNG ──
+(daed:rng-seed! 1)
+(define u0 (daed:rng-u01))
+(define a-u (daed:check-rel u0 (/ 16807.0 2147483647.0) 1e-12 1e-18))
+(daed:rng-seed! 7)
+(define gs 0.0)
+(define g2 0.0)
+(define gi 0)
+(while (lambda () (< gi 200))
+  (lambda ()
+    (let ((z (daed:rng-gauss 0.0 1.0)))
+      (set! gs (+ gs z))
+      (set! g2 (+ g2 (* z z))))
+    (set! gi (+ gi 1))))
+(define gmean (/ gs 200.0))
+(define gstd (sqrt (/ (- g2 (/ (* gs gs) 200.0)) 199.0)))
+(define a-gm (daed:check-true (and (< (abs gmean) 0.25)
+                                   (> gstd 0.80)
+                                   (< gstd 1.20))))
+
+(display "A u01=")
+(display u0)
+(display " gauss mean=")
+(display gmean)
+(display " std=")
+(display gstd)
+(newline)
+
+; ── B. Divider ±5 % uniform ──
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+(define specs
+  (list (daed:mc-spec "r1" "value" (daed:dist-rel 1e3 0.05 "uniform"))
+        (daed:mc-spec "r2" "value" (daed:dist-rel 2e3 0.05 "uniform"))))
+
+(daed:rng-seed! 42)
+(define mc (daed:mc-op ckt specs 80 2))
+(daed:stats-bump! "sim_runs")
+(define nom (/ 10.0 3.0))
+(define b-ok (daed:check-true (daed:mc-ok? mc)))
+(define b-n (daed:check-eq (daed:mc-n mc) 80))
+(define b-mean (daed:check-approx (daed:mc-mean mc) nom 0.04))
+(define b-std (daed:check-true (and (> (daed:mc-std mc) 0.015)
+                                    (< (daed:mc-std mc) 0.090))))
+(define b-span (daed:check-true (and (< (daed:mc-min mc) (- nom 0.04))
+                                     (> (daed:mc-max mc) (+ nom 0.04))
+                                     (< (daed:mc-min mc) (daed:mc-mean mc))
+                                     (< (daed:mc-mean mc) (daed:mc-max mc)))))
+(define r1-back (daed:check-approx
+                  (daed:comp-value (daed:find-comp ckt "r1")) 1e3 1e-9))
+(define r2-back (daed:check-approx
+                  (daed:comp-value (daed:find-comp ckt "r2")) 2e3 1e-9))
+
+(display "B n=")
+(display (daed:mc-n mc))
+(display " mean=")
+(display (daed:mc-mean mc))
+(display " std=")
+(display (daed:mc-std mc))
+(display " min=")
+(display (daed:mc-min mc))
+(display " max=")
+(display (daed:mc-max mc))
+(newline)
+
+; ── C. Reproducible + trial inspect ──
+(daed:rng-seed! 42)
+(define mc2 (daed:mc-op ckt specs 8 2))
+(daed:stats-bump! "sim_runs")
+(define v0 (vector-ref (daed:mc-values mc) 0))
+(define v0b (vector-ref (daed:mc-values mc2) 0))
+(define c-rep (daed:check-approx v0 v0b 1e-12))
+(define t0 (daed:mc-trial mc 0))
+(define c-tr (daed:check-true (and t0
+                                   (hash-ref t0 "ok" #f)
+                                   (number? (hash-ref t0 "v" #f)))))
+
+; ── D. Agent yield / robust? ──
+(define y-wide (daed:mc-yield mc 3.15 3.52))
+(define y-out (daed:mc-yield mc 4.5 5.0))
+(define d-wide (daed:check-true (and (> y-wide 0.85)
+                                     (daed:mc-robust? mc 3.15 3.52 0.85))))
+(define d-out (daed:check-true (and (< y-out 0.02)
+                                    (not (daed:mc-robust? mc 4.5 5.0 0.50)))))
+(define d-tight (daed:check-true
+                  (not (daed:mc-robust? mc 3.32 3.34 0.90))))
+
+(display "D yield[3.15,3.52]=")
+(display y-wide)
+(display " yield[4.5,5]=")
+(display y-out)
+(newline)
+
+; ── E. RC .tran + measure-final ──
+(define tau 1e-3)
+(define ckt-c
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 1e-6))))
+(define cspecs
+  (list (daed:mc-spec "c1" "value" (daed:dist-rel 1e-6 0.20 "uniform"))))
+(define dt (/ tau 20.0))
+(define ns (daed:nsteps-for tau dt))
+(daed:rng-seed! 3)
+(define mct (daed:mc-tran ckt-c cspecs 8 dt ns 2 "final"))
+(daed:stats-bump! "sim_runs")
+(define vtau (* Vin (- 1.0 (exp -1.0))))
+(define e-ok (daed:check-true (daed:mc-ok? mct)))
+(define e-n (daed:check-eq (daed:mc-n mct) 8))
+(define e-mean (daed:check-approx (daed:mc-mean mct) vtau 0.40))
+(define e-span (daed:check-true (> (- (daed:mc-max mct) (daed:mc-min mct)) 0.10)))
+(define c-back (daed:check-approx
+                 (daed:comp-value (daed:find-comp ckt-c "c1")) 1e-6 1e-15))
+
+(display "E tran n=")
+(display (daed:mc-n mct))
+(display " mean=")
+(display (daed:mc-mean mct))
+(display " min=")
+(display (daed:mc-min mct))
+(display " max=")
+(display (daed:mc-max mct))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok
+       a-u a-gm
+       b-ok b-n b-mean b-std b-span r1-back r2-back
+       c-rep c-tr
+       d-wide d-out d-tight
+       e-ok e-n e-mean e-span c-back
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 3)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: Monte Carlo + yield (escapes=0)")
+    (newline)
+    (display "RESULT pass example=22-monte-carlo escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: monte-carlo denseness probe")
+    (newline)
+    (display "RESULT fail example=22-monte-carlo")
+    (newline)
+    (display "  a-u=")
+    (display a-u)
+    (display " a-gm=")
+    (display a-gm)
+    (display " b-ok=")
+    (display b-ok)
+    (display " b-mean=")
+    (display b-mean)
+    (display " b-std=")
+    (display b-std)
+    (display " c-rep=")
+    (display c-rep)
+    (display " d-wide=")
+    (display d-wide)
+    (display " d-tight=")
+    (display d-tight)
+    (display " e-ok=")
+    (display e-ok)
+    (display " e-span=")
+    (display e-span)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

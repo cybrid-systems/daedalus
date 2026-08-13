@@ -88,3 +88,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] `.measure` + waveform CSV export (issue #20, probe 19)
 - [x] Convergence aids: Gmin-step / source-step / ptran (issue #21, probe 20)
 - [x] Parameter `.step` + temperature (issue #22, probe 21)
+- [x] Monte Carlo + yield (issue #23, probe 22)
