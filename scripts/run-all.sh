@@ -24,6 +24,7 @@ PROBES=(
   17-adapt-tran
   18-mosfet
   19-measure
+  20-converge-aids
 )
 
 pass=0

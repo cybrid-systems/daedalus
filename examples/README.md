@@ -33,6 +33,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 17 | [adapt-tran](17-adapt-tran/) | LTE adaptive `.tran` | **PASS** (issue #18 / M2) |
 | 18 | [mosfet](18-mosfet/) | Level-1 NMOS `.op` + adapt `.tran` | **PASS** (issue #19 / M2) |
 | 19 | [measure](19-measure/) | `.measure` + CSV export | **PASS** (issue #20 / M2) |
+| 20 | [converge-aids](20-converge-aids/) | Gmin / source / ptran | **PASS** (issue #21 / M3) |
 
 ## Phase map
 
@@ -49,3 +50,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **M0** | 11–14 | Netlist, `.op`, `.tran`, mutate/rollback (issues #12–#15) |
 | **M1** | 15–16 | NR helpers + nonlinear `.op` vs ngspice (issues #16–#17) |
 | **M2** | 17–19 | Adaptive `.tran`, MOSFET, `.measure` (issues #18–#20) |
+| **M3** | 20 | Gmin / source / ptran convergence aids (issue #21) |

@@ -72,6 +72,8 @@ required=(
   "examples/18-mosfet/README.md"
   "examples/19-measure/main.aura"
   "examples/19-measure/README.md"
+  "examples/20-converge-aids/main.aura"
+  "examples/20-converge-aids/README.md"
   "examples/16-nl-op-suite/ref/ngspice.tsv"
   "examples/16-nl-op-suite/spice/diode-bias.cir"
   "examples/16-nl-op-suite/spice/diode-series.cir"

@@ -28,6 +28,13 @@
         daed:op-lambda
         daed:simulate-op-from
         daed:simulate-op-gmin
+        daed:simulate-op-gmin-step
+        daed:simulate-op-source
+        daed:simulate-op-ptran
+        daed:simulate-op-aid
+        daed:op-aid
+        daed:op-aid-steps
+        daed:op-aid-tried
         daed:nr-maxiter
         daed:nr-atol
         daed:nr-vtol
@@ -37,8 +44,8 @@
 (require "stamp" all:)
 (require "devices" all:)
 
-; 5 = issue #16 NR line-search, hist, gmin / previous guess
-(define daed:solve-version 5)
+; 6 = issue #21 Gmin-step / source-step / ptran / aid chain
+(define daed:solve-version 6)
 
 (define daed:nr-maxiter 50)
 (define daed:nr-atol 1e-8)
@@ -342,11 +349,19 @@
 ;   x      → solution vector (node voltages then branch currents)
 ;   volts  → hash "1"→v1, "2"→v2, … (string keys for node ids); "0"→0.0
 ;   iters / residual / nr  → Newton stats (linear path: iters=1, nr=#f)
+(define (daed:tag-aid res name steps tried)
+  (hash-set! res "aid" name)
+  (hash-set! res "aid_steps" steps)
+  (hash-set! res "aid_tried" tried)
+  res)
+
 (define (daed:simulate-op ckt)
   (let ((comps (daed:ckt-comps ckt)))
-    (if (daed:has-nonlinear? comps)
-      (daed:simulate-op-nr comps)
-      (daed:simulate-op-lin comps))))
+    (daed:tag-aid
+      (if (daed:has-nonlinear? comps)
+        (daed:simulate-op-nr comps)
+        (daed:simulate-op-lin comps))
+      "none" 0 (list "none"))))
 
 (define (daed:simulate-op-lin comps)
   (let ((sys (daed:stamp-system comps)))
@@ -539,3 +554,293 @@
 
 (define (daed:op-lambda res)
   (hash-ref res "lambda" 1.0))
+
+(define (daed:op-aid res)
+  (hash-ref res "aid" "none"))
+
+(define (daed:op-aid-steps res)
+  (hash-ref res "aid_steps" 0))
+
+(define (daed:op-aid-tried res)
+  (hash-ref res "aid_tried" '()))
+
+; Gmin from every voltage node to GND (SPICE-style). Mutates J and F.
+(define (daed:apply-gmin-gnd! J F x N n-v gmin)
+  (let ((k 0))
+    (while (lambda () (< k n-v))
+      (lambda ()
+        (if (and (>= k 0) (< k N))
+          (begin
+            (daed:mat-add! J N k k gmin)
+            (let ((xk 0.0))
+              (if (< k (vector-length x))
+                (set! xk (daed:vec-ref x k))
+                0)
+              (daed:vec-add! F k (* gmin xk))))
+          0)
+        (set! k (+ k 1))))
+    #t))
+
+(define (daed:simulate-op-nr-gmin-gnd comps gmin x0)
+  (daed:pack-op-nr
+    (daed:newton-solve
+      (lambda (x xo)
+        (let ((sys (daed:stamp-system-nr comps x xo)))
+          (let ((N (car sys))
+                (J (car (cdr sys)))
+                (F (car (cdr (cdr sys))))
+                (n-v (car (cdr (cdr (cdr sys))))))
+            (if (and (> N 0) (number? gmin) (> gmin 0.0))
+              (daed:apply-gmin-gnd! J F x N n-v gmin)
+              0)
+            sys)))
+      x0)
+    comps))
+
+(define (daed:simulate-op-lin-gmin comps gmin)
+  (let ((sys (daed:stamp-system comps)))
+    (let ((N (car sys))
+          (A (car (cdr sys)))
+          (b (car (cdr (cdr sys))))
+          (n-v (car (cdr (cdr (cdr sys))))))
+      (let ((res (hash))
+            (k 0))
+        (hash-set! res "n" N)
+        (hash-set! res "n_v" n-v)
+        (hash-set! res "iters" 1)
+        (hash-set! res "residual" 0.0)
+        (hash-set! res "nr" #f)
+        (hash-set! res "reason" "linear-gmin")
+        (if (or (<= N 0) (not (number? gmin)) (<= gmin 0.0))
+          (begin
+            (hash-set! res "ok" #f)
+            (hash-set! res "x" (make-vector 0 0.0))
+            (hash-set! res "volts" (hash))
+            (hash-set! res "ibranch" (hash))
+            res)
+          (begin
+            (while (lambda () (< k n-v))
+              (lambda ()
+                (if (< k N)
+                  (daed:mat-add! A N k k gmin)
+                  0)
+                (set! k (+ k 1))))
+            (let ((ok (daed:dense-solve! A b N)))
+              (hash-set! res "ok" ok)
+              (hash-set! res "x" b)
+              (hash-set! res "volts" (if ok (daed:volts-from-x b n-v) (hash)))
+              (hash-set! res "ibranch"
+                (if ok (daed:ibranch-from-x b comps #t) (hash)))
+              res)))))))
+
+; Ramp Gmin-to-ground 1e-3 → 1e-12.
+(define (daed:simulate-op-gmin-step ckt)
+  (let ((comps (daed:ckt-comps ckt)))
+    (if (not (daed:has-nonlinear? comps))
+      (daed:tag-aid (daed:simulate-op-lin-gmin comps 1e-12)
+                    "gmin-step" 1 (list "gmin-step"))
+      (let ((N (daed:mna-size comps))
+            (g 1e-3)
+            (cur #f)
+            (steps 0)
+            (going #t)
+            (x0 #f))
+        (set! x0 (make-vector N 0.0))
+        (set! cur (daed:simulate-op-nr-gmin-gnd comps g x0))
+        (set! steps 1)
+        (if (not (hash-ref cur "ok" #f))
+          (daed:tag-aid cur "gmin-step" steps (list "gmin-step"))
+          (begin
+            (set! g 1e-4)
+            (while (lambda () (and going (>= g 5e-13)))
+              (lambda ()
+                (set! cur (daed:simulate-op-nr-gmin-gnd comps g
+                            (daed:x0-from-prev cur N)))
+                (set! steps (+ steps 1))
+                (if (not (hash-ref cur "ok" #f))
+                  (set! going #f)
+                  (set! g (* g 0.1)))))
+            (daed:tag-aid cur "gmin-step" steps (list "gmin-step"))))))))
+
+(define (daed:save-sources! comps)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (if (or (equal? (daed:comp-type (car cs)) "V")
+                (equal? (daed:comp-type (car cs)) "I"))
+          (hash-set! (car cs) "src0" (daed:comp-value (car cs)))
+          0)
+        (loop (cdr cs))))))
+
+(define (daed:scale-sources! comps s)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (if (or (equal? (daed:comp-type (car cs)) "V")
+                (equal? (daed:comp-type (car cs)) "I"))
+          (let ((full (hash-ref (car cs) "src0" 0.0)))
+            (daed:comp-set-value! (car cs) (* full s)))
+          0)
+        (loop (cdr cs))))))
+
+(define (daed:restore-sources! comps)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (if (or (equal? (daed:comp-type (car cs)) "V")
+                (equal? (daed:comp-type (car cs)) "I"))
+          (let ((full (hash-ref (car cs) "src0" #f)))
+            (if (number? full)
+              (daed:comp-set-value! (car cs) full)
+              0))
+          0)
+        (loop (cdr cs))))))
+
+; Ramp independent V/I from 0.2 → 1.0.
+(define (daed:simulate-op-source ckt)
+  (let ((comps (daed:ckt-comps ckt)))
+    (if (not (daed:has-nonlinear? comps))
+      (daed:tag-aid (daed:simulate-op-lin comps)
+                    "source-step" 0 (list "source-step"))
+      (begin
+        (daed:save-sources! comps)
+        (let ((s 0.2)
+              (cur #f)
+              (steps 0)
+              (going #t)
+              (N (daed:mna-size comps)))
+          (daed:scale-sources! comps s)
+          (set! cur (daed:simulate-op-nr comps))
+          (set! steps 1)
+          (if (not (hash-ref cur "ok" #f))
+            (begin
+              (daed:restore-sources! comps)
+              (daed:tag-aid cur "source-step" steps (list "source-step")))
+            (begin
+              (set! s 0.4)
+              (while (lambda () (and going (<= s 1.0001)))
+                (lambda ()
+                  (daed:scale-sources! comps s)
+                  (set! cur (daed:simulate-op-nr-from comps cur))
+                  (set! steps (+ steps 1))
+                  (if (not (hash-ref cur "ok" #f))
+                    (set! going #f)
+                    (set! s (+ s 0.2)))))
+              (daed:restore-sources! comps)
+              (let ((final (if (hash-ref cur "ok" #f)
+                             (daed:simulate-op-nr-from comps cur)
+                             cur)))
+                (daed:tag-aid final "source-step" steps
+                              (list "source-step"))))))))))
+
+; Pseudo-transient: grounded C on every node, then one DC NR.
+(define (daed:apply-ptran-c! J F x xp N n-v coh)
+  (let ((k 0))
+    (while (lambda () (< k n-v))
+      (lambda ()
+        (if (< k N)
+          (begin
+            (daed:mat-add! J N k k coh)
+            (let ((xk 0.0)
+                  (xo 0.0))
+              (if (< k (vector-length x))
+                (set! xk (daed:vec-ref x k))
+                0)
+              (if (< k (vector-length xp))
+                (set! xo (daed:vec-ref xp k))
+                0)
+              (daed:vec-add! F k (* coh (- xk xo)))))
+          0)
+        (set! k (+ k 1))))
+    #t))
+
+(define (daed:simulate-op-ptran ckt)
+  (let ((comps (daed:ckt-comps ckt)))
+    (if (not (daed:has-nonlinear? comps))
+      (daed:tag-aid (daed:simulate-op-lin comps)
+                    "ptran" 0 (list "ptran"))
+      (let ((N (daed:mna-size comps))
+            (h 1e-5)
+            (cpt 1e-8)
+            (ns 40)
+            (xp #f)
+            (cur #f)
+            (k 0)
+            (ok #t)
+            (coh 0.0))
+        (set! coh (/ cpt h))
+        (set! xp (make-vector N 0.0))
+        (while (lambda () (and ok (< k ns)))
+          (lambda ()
+            (set! k (+ k 1))
+            (set! cur
+              (daed:pack-op-nr
+                (daed:newton-solve
+                  (lambda (x xo)
+                    (let ((sys (daed:stamp-system-nr comps x xo)))
+                      (let ((Nn (car sys))
+                            (J (car (cdr sys)))
+                            (F (car (cdr (cdr sys))))
+                            (nv (car (cdr (cdr (cdr sys))))))
+                        (if (> Nn 0)
+                          (daed:apply-ptran-c! J F x xp Nn nv coh)
+                          0)
+                        sys)))
+                  xp)
+                comps))
+            (if (hash-ref cur "ok" #f)
+              (set! xp (daed:copy-vec (daed:op-x cur)))
+              (set! ok #f))))
+        (if (not ok)
+          (daed:tag-aid (if cur cur (hash)) "ptran" k (list "ptran"))
+          (let ((final (daed:simulate-op-nr-from comps cur)))
+            (if (hash-ref final "ok" #f)
+              (daed:tag-aid final "ptran" k (list "ptran"))
+              (daed:tag-aid cur "ptran" k (list "ptran")))))))))
+
+; Try none → gmin-step → source-step → device-gmin → ptran.
+(define (daed:simulate-op-aid ckt)
+  (let ((comps (daed:ckt-comps ckt))
+        (tried '())
+        (r #f))
+    (if (not (daed:has-nonlinear? comps))
+      (begin
+        (set! r (daed:simulate-op-lin comps))
+        (if (hash-ref r "ok" #f)
+          (daed:tag-aid r "none" 0 (list "none"))
+          (daed:tag-aid (daed:simulate-op-lin-gmin comps 1e-12)
+                        "gmin-step" 1 (list "none" "gmin-step"))))
+      (begin
+        (set! r (daed:simulate-op-nr comps))
+        (set! tried (cons "none" tried))
+        (if (hash-ref r "ok" #f)
+          (daed:tag-aid r "none" 0 (reverse tried))
+          (begin
+            (set! r (daed:simulate-op-gmin-step ckt))
+            (set! tried (cons "gmin-step" tried))
+            (if (hash-ref r "ok" #f)
+              (begin
+                (hash-set! r "aid_tried" (reverse tried))
+                r)
+              (begin
+                (set! r (daed:simulate-op-source ckt))
+                (set! tried (cons "source-step" tried))
+                (if (hash-ref r "ok" #f)
+                  (begin
+                    (hash-set! r "aid_tried" (reverse tried))
+                    r)
+                  (begin
+                    (set! r (daed:simulate-op-gmin ckt))
+                    (set! tried (cons "gmin-dev" tried))
+                    (if (hash-ref r "ok" #f)
+                      (daed:tag-aid r "gmin-dev"
+                                    (hash-ref r "iters" 0)
+                                    (reverse tried))
+                      (begin
+                        (set! r (daed:simulate-op-ptran ckt))
+                        (set! tried (cons "ptran" tried))
+                        (hash-set! r "aid_tried" (reverse tried))
+                        r))))))))))))

@@ -1,0 +1,184 @@
+; examples/20-converge-aids/main.aura
+;
+; Milestone 3 / issue #21 — Gmin stepping, source stepping, pseudo-transient.
+;   A. Diode cold-start: aid=none
+;   B. Linear floating C node: cold fails, gmin-step converges
+;   C. Floating MOSFET gate: cold fails, aid chain uses gmin-step
+;   D. Source-step diode matches cold vd
+;   E. Ptran diode converges
+;
+; Axes: aid chain + logging + NR fallbacks
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/20-converge-aids/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 20-converge-aids: Gmin / source / ptran ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:solve-version)
+                                     (>= daed:solve-version 6))))
+
+; ── A. Easy diode: aid=none ──
+(define ckt-d
+  (daed:circuit "diode"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:D "d1" 2 0))))
+
+(define op-d (daed:simulate-op-aid ckt-d))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-true (daed:op-ok? op-d)))
+(define d-vd (daed:v op-d 2))
+(define d-v (daed:check-true (and (number? d-vd) (> d-vd 0.55) (< d-vd 0.85))))
+(define d-aid (daed:check-true (equal? (daed:op-aid op-d) "none")))
+
+(display "A diode aid=")
+(display (daed:op-aid op-d))
+(display " vd=")
+(display d-vd)
+(newline)
+
+; ── B. Linear floating capacitor node ──
+(define ckt-c
+  (daed:circuit "float-c"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 3 0 1e-6))))
+
+(define op-c0 (daed:simulate-op ckt-c))
+(daed:stats-bump! "sim_runs")
+(define c-cold (daed:check-true (not (daed:op-ok? op-c0))))
+(define op-c (daed:simulate-op-aid ckt-c))
+(daed:stats-bump! "sim_runs")
+(define c-ok (daed:check-true (daed:op-ok? op-c)))
+(define c-aid (daed:check-true (equal? (daed:op-aid op-c) "gmin-step")))
+(define c-v2 (daed:check-approx (daed:v op-c 2) 5.0 1e-3))
+(define c-v3 (daed:check-approx (daed:v op-c 3) 0.0 1e-6))
+
+(display "B float-C cold=")
+(display (daed:op-ok? op-c0))
+(display " aid=")
+(display (daed:op-aid op-c))
+(display " v2=")
+(display (daed:v op-c 2))
+(display " v3=")
+(display (daed:v op-c 3))
+(newline)
+
+; ── C. Floating MOSFET gate ──
+(define ckt-m
+  (daed:circuit "float-g"
+    (list (daed:V "vdd" 1 0 5.0)
+          (daed:R "rd" 1 2 1e3)
+          (daed:M "m1" 2 3 0))))
+
+(define op-m0 (daed:simulate-op ckt-m))
+(daed:stats-bump! "sim_runs")
+(define m-cold (daed:check-true (not (daed:op-ok? op-m0))))
+(define op-m (daed:simulate-op-aid ckt-m))
+(daed:stats-bump! "sim_runs")
+(define m-ok (daed:check-true (daed:op-ok? op-m)))
+(define m-aid (daed:check-true (equal? (daed:op-aid op-m) "gmin-step")))
+(define m-v (daed:check-approx (daed:v op-m 2) 5.0 0.05))
+(define m-steps (daed:check-true (and (number? (daed:op-aid-steps op-m))
+                                     (> (daed:op-aid-steps op-m) 0))))
+(define tried (daed:op-aid-tried op-m))
+(define m-tried (daed:check-true (and (pair? tried)
+                                     (equal? (car tried) "none"))))
+
+(display "C float-G cold=")
+(display (daed:op-ok? op-m0))
+(display " aid=")
+(display (daed:op-aid op-m))
+(display " steps=")
+(display (daed:op-aid-steps op-m))
+(display " vout=")
+(display (daed:v op-m 2))
+(display " tried=")
+(write tried)
+(newline)
+
+; ── D. Source-step matches cold diode ──
+(define op-s (daed:simulate-op-source ckt-d))
+(daed:stats-bump! "sim_runs")
+(define s-ok (daed:check-true (daed:op-ok? op-s)))
+(define s-aid (daed:check-true (equal? (daed:op-aid op-s) "source-step")))
+(define s-v (daed:check-approx (daed:v op-s 2) d-vd 1e-3))
+(define s-steps (daed:check-true (and (number? (daed:op-aid-steps op-s))
+                                     (>= (daed:op-aid-steps op-s) 2))))
+
+(display "D source-step vd=")
+(display (daed:v op-s 2))
+(display " steps=")
+(display (daed:op-aid-steps op-s))
+(newline)
+
+; ── E. Pseudo-transient diode ──
+(define op-p (daed:simulate-op-ptran ckt-d))
+(daed:stats-bump! "sim_runs")
+(define p-ok (daed:check-true (daed:op-ok? op-p)))
+(define p-aid (daed:check-true (equal? (daed:op-aid op-p) "ptran")))
+(define p-v (daed:check-true (and (number? (daed:v op-p 2))
+                                 (> (daed:v op-p 2) 0.55)
+                                 (< (daed:v op-p 2) 0.85))))
+
+(display "E ptran vd=")
+(display (daed:v op-p 2))
+(display " steps=")
+(display (daed:op-aid-steps op-p))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok
+       d-ok d-v d-aid
+       c-cold c-ok c-aid c-v2 c-v3
+       m-cold m-ok m-aid m-v m-steps m-tried
+       s-ok s-aid s-v s-steps
+       p-ok p-aid p-v
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 6)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: converge aids (gmin/source/ptran) (escapes=0)")
+    (newline)
+    (display "RESULT pass example=20-converge-aids escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: converge-aids denseness probe")
+    (newline)
+    (display "RESULT fail example=20-converge-aids")
+    (newline)
+    (display "  d-aid=")
+    (display d-aid)
+    (display " c-cold=")
+    (display c-cold)
+    (display " c-aid=")
+    (display c-aid)
+    (display " m-cold=")
+    (display m-cold)
+    (display " m-aid=")
+    (display m-aid)
+    (display " s-ok=")
+    (display s-ok)
+    (display " p-ok=")
+    (display p-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

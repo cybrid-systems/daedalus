@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0 + M1 + M2** — probes **00–03, 05–19** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0–M3** — probes **00–03, 05–20** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -52,6 +52,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [17](../examples/17-adapt-tran/) | LTE adaptive `.tran` (issue #18) | **PASS** | 0 | 0 |
 | [18](../examples/18-mosfet/) | Level-1 NMOS (issue #19) | **PASS** | 0 | 0 |
 | [19](../examples/19-measure/) | `.measure` + CSV (issue #20) | **PASS** | 0 | 0 |
+| [20](../examples/20-converge-aids/) | Gmin / source / ptran (issue #21) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -117,6 +118,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - `measure.aura`: MAX / MIN / AVG / RMS (trapezoidal), WHEN rising-cross, TRIG/TARG delay and 10–90 % rise.
 - `daed:tran->csv` / `write-tran-csv!` for plotters; `daed:measure-summary` for agents.
 - Probe 19: RC final / WHEN 2.5 V / rise time vs analytic; CSV header `t,v1,v2`.
+
+### Issue #21 narrative (convergence aids)
+
+- `daed:simulate-op-aid` tries `none → gmin-step → source-step → gmin-dev → ptran`.
+- Gmin-to-ground stepping repairs empty DC rows (floating C / MOSFET gate).
+- Source stepping ramps V/I 0.2→1; ptran adds grounded C then a final DC NR.
+- `daed:op-aid` / `aid-steps` / `aid-tried` are queryable. Cold `simulate-op` unchanged.
 
 ## Judgment
 

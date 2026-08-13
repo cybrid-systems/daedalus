@@ -8,7 +8,7 @@
 | `netlist.aura` | 1–5 / M0 / M2 | Circuit ADT (`R`/`C`/`L`/`V`/`I`/`D`/`Q`/`M`/`E`/`G`/`F`/`H`) |
 | `stamp.aura` | 1–2 / M0 | MNA stamp: DC + BE + controlled sources |
 | `devices.aura` | 5 / M2 | Shockley + Ebers-Moll NPN + Level-1 NMOS + NR residual/Jacobian |
-| `solve.aura` | 1 / 5 / M0 / M1 | Dense GE + linear `.op` + NR (line-search, hist, gmin) |
+| `solve.aura` | 1 / 5 / M0 / M1 / M3 | Dense GE + NR + Gmin/source/ptran aid chain |
 | `tran.aura` | 2 / 5 / M0 / M2 | Fixed-step BE `.tran` + LTE adaptive step control |
 | `probe.aura` | 1–2 | Node voltage / series query |
 | `measure.aura` | M2 / #20 | `.measure` (max/min/avg/rms/when/rise) + CSV |

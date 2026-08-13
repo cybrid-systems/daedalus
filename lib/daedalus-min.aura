@@ -51,6 +51,9 @@
         ; solve
         daed:solve-version daed:dense-solve! daed:newton-solve
         daed:simulate-op daed:simulate-op-from daed:simulate-op-gmin
+        daed:simulate-op-gmin-step daed:simulate-op-source
+        daed:simulate-op-ptran daed:simulate-op-aid
+        daed:op-aid daed:op-aid-steps daed:op-aid-tried
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
         daed:op-iters daed:op-residual daed:op-i daed:op-ibranch
         daed:op-hist daed:op-fail-node daed:op-lambda

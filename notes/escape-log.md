@@ -99,6 +99,11 @@ No leave from \(V_A\). Crossing / integral queries and CSV string build stay
 on the existing `.tran` series. `write-file` is the same host primitive used
 by viz (not a new numerical escape).
 
+## Issue #21 (convergence aids)
+
+No leave from \(V_A\). Gmin-to-ground, source ramp, and pseudo-transient reuse
+the existing dense NR / GE kernel. Cold `simulate-op` is unchanged.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

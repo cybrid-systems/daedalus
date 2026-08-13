@@ -283,6 +283,12 @@ Level-1 NMOS ([issue #19](https://github.com/cybrid-systems/daedalus/issues/19))
 ./scripts/run-aura.sh examples/19-measure/main.aura
 ```
 
+Convergence aids ([issue #21](https://github.com/cybrid-systems/daedalus/issues/21)):
+
+```bash
+./scripts/run-aura.sh examples/20-converge-aids/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a
