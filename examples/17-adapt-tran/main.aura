@@ -1,0 +1,209 @@
+; examples/17-adapt-tran/main.aura
+;
+; Milestone 2 / issue #18 — LTE adaptive Backward-Euler .tran.
+;   A. RC step: v(τ), v(5τ) vs analytic and vs fine fixed-step
+;   B. dt grows in the flat tail, shrinks at the rising edge
+;   C. Fast RC (stiff-ish) finishes without dt collapse
+;   D. Nonlinear diode clamp still converges
+;
+; Axes: LTE control + reject/grow + linear/NR steps + interpolate
+; Escapes on core path: 0
+;
+; Binding note: prefer top-level / let* over internal define.
+;
+; Run: ./scripts/run-aura.sh examples/17-adapt-tran/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 17-adapt-tran: LTE adaptive .tran ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " tran=")
+(display daed:tran-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:tran-version)
+                                     (>= daed:tran-version 4))))
+
+(define Vin 5.0)
+(define Rval 1e3)
+(define Cval 1e-6)
+(define tau (* Rval Cval))
+(define tstop (* 5.0 tau))
+(define want-tau (* Vin (- 1.0 (exp -1.0))))
+(define want-end (* Vin (- 1.0 (exp -5.0))))
+
+(define ckt
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval))))
+
+; Fine fixed-step reference
+(define dt-fine (/ tau 200.0))
+(define tr-fine (daed:simulate-tran ckt dt-fine (daed:nsteps-for tstop dt-fine)))
+(daed:stats-bump! "sim_runs")
+(define fine-ok (daed:check-true (daed:tran-ok? tr-fine)))
+
+; Adaptive
+(define dt0 (/ tau 20.0))
+(define tr (daed:simulate-tran-adapt ckt tstop dt0))
+(daed:stats-bump! "sim_runs")
+(define ad-ok (daed:check-true (daed:tran-ok? tr)))
+(define nacc (daed:tran-accepted tr))
+(define nrej (daed:tran-rejected tr))
+(define dth (daed:tran-dthist tr))
+(define times (daed:tran-times tr))
+(define v0 (daed:tran-v-at-t tr 2 0.0))
+(define v-tau (daed:tran-v-at-t tr 2 tau))
+(define v-end (daed:tran-v-at-t tr 2 tstop))
+(define v-tau-f (daed:tran-v-at-t tr-fine 2 tau))
+(define v-end-f (daed:tran-v-at-t tr-fine 2 tstop))
+
+(define ic-ok (daed:check-approx v0 0.0 1e-9))
+(define tau-an (daed:check-rel v-tau want-tau 0.05 1e-6))
+(define end-an (daed:check-rel v-end want-end 0.03 1e-6))
+(define tau-fi (daed:check-rel v-tau v-tau-f 0.03 1e-6))
+(define end-fi (daed:check-rel v-end v-end-f 0.02 1e-6))
+(define acc-ok (daed:check-true (and (number? nacc) (> nacc 8) (< nacc 800))))
+(define rej-ok (daed:check-true (and (number? nrej) (>= nrej 0))))
+(define hist-ok (daed:check-true (and (vector? dth) (= (vector-length dth) nacc))))
+(define reached (daed:check-rel (daed:tran-tstop tr) tstop 1e-6 1e-12))
+
+; Edge vs flat dt: min dt with t_end < 0.5τ vs max dt with t_end > 2τ
+(define n-h (vector-length dth))
+(define n-t (vector-length times))
+(define dt-edge 1e300)
+(define dt-flat 0.0)
+(define i 0)
+(while (lambda () (< i n-h))
+  (lambda ()
+    (let ((te (if (< (+ i 1) n-t) (vector-ref times (+ i 1)) 0.0))
+          (hi (vector-ref dth i)))
+      (if (and (number? te) (< te (* 0.5 tau)) (< hi dt-edge))
+        (set! dt-edge hi)
+        0)
+      (if (and (number? te) (> te (* 2.0 tau)) (> hi dt-flat))
+        (set! dt-flat hi)
+        0))
+    (set! i (+ i 1))))
+(define grow-ok (daed:check-true (and (number? dt-edge) (number? dt-flat)
+                                     (< dt-edge 1e299)
+                                     (> dt-flat (* 2.0 dt-edge)))))
+
+(display "A RC adapt ok=")
+(display (daed:tran-ok? tr))
+(display " accepted=")
+(display nacc)
+(display " rejected=")
+(display nrej)
+(display " v2(tau)=")
+(display v-tau)
+(display " v2(5tau)=")
+(display v-end)
+(newline)
+(display "  dt-edge=")
+(display dt-edge)
+(display " dt-flat=")
+(display dt-flat)
+(display " fine n=")
+(display (daed:tran-nsteps tr-fine))
+(newline)
+
+; ── C. Fast RC: τ=1 µs, tstop=50 µs ──
+(define tau-f 1e-6)
+(define ckt-f
+  (daed:circuit "rc-fast"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 1e-9))))
+(define tr-f (daed:simulate-tran-adapt ckt-f (* 50.0 tau-f) (* 0.2 tau-f)))
+(daed:stats-bump! "sim_runs")
+(define f-ok (daed:check-true (daed:tran-ok? tr-f)))
+(define f-end (daed:tran-v-at-t tr-f 2 (* 50.0 tau-f)))
+(define f-v (daed:check-rel f-end Vin 0.02 1e-6))
+(define f-n (daed:tran-accepted tr-f))
+(define f-steps (daed:check-true (and (number? f-n) (> f-n 5) (< f-n 4000))))
+
+(display "C fast-RC ok=")
+(display (daed:tran-ok? tr-f))
+(display " vend=")
+(display f-end)
+(display " accepted=")
+(display f-n)
+(display " rejected=")
+(display (daed:tran-rejected tr-f))
+(newline)
+
+; ── D. Nonlinear clamp ──
+(define ckt-d
+  (daed:circuit "clamp"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:C "c1" 2 0 Cval)
+          (daed:D "d1" 2 0))))
+(define tr-d (daed:simulate-tran-adapt ckt-d (* 3.0 tau) (/ tau 20.0)))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-true (daed:tran-ok? tr-d)))
+(define d-end (daed:tran-v tr-d 2))
+(define d-vd (daed:check-true (and (number? d-end) (> d-end 0.55) (< d-end 0.85))))
+(define d-acc (daed:check-true (and (number? (daed:tran-accepted tr-d))
+                                   (> (daed:tran-accepted tr-d) 5))))
+
+(display "D clamp ok=")
+(display (daed:tran-ok? tr-d))
+(display " vend=")
+(display d-end)
+(display " accepted=")
+(display (daed:tran-accepted tr-d))
+(display " nr-iters=")
+(display (daed:tran-iters tr-d))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok fine-ok ad-ok
+       ic-ok tau-an end-an tau-fi end-fi
+       acc-ok rej-ok hist-ok reached grow-ok
+       f-ok f-v f-steps
+       d-ok d-vd d-acc
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: LTE adaptive .tran (escapes=0)")
+    (newline)
+    (display "RESULT pass example=17-adapt-tran escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: adaptive .tran denseness probe")
+    (newline)
+    (display "RESULT fail example=17-adapt-tran")
+    (newline)
+    (display "  ad-ok=")
+    (display ad-ok)
+    (display " tau-an=")
+    (display tau-an)
+    (display " end-an=")
+    (display end-an)
+    (display " grow-ok=")
+    (display grow-ok)
+    (display " f-ok=")
+    (display f-ok)
+    (display " d-ok=")
+    (display d-ok)
+    (display " d-vd=")
+    (display d-vd)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

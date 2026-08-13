@@ -1,8 +1,9 @@
-; lib/tran.aura — Fixed-step transient analysis (Phase 2 / 5)
+; lib/tran.aura — Transient analysis (Phase 2 / 5 / M2)
 ;
 ; (require "tran" all:)
 ;
-; Backward Euler, fixed dt.
+; Backward Euler. Fixed-step path unchanged (probes 02/09/13).
+; Adaptive path (issue #18): LTE step control, reject/grow, min/max dt.
 ; Nonlinear circuits: BE companions + Newton-Raphson at each step.
 ; Linear circuits keep the one-shot companion solve.
 ; nsteps may be integer or float (e.g. from tstop/dt); coerced to exact int.
@@ -15,6 +16,7 @@
         daed:nsteps-for
         daed:as-int
         daed:simulate-tran
+        daed:simulate-tran-adapt
         daed:tran-ok?
         daed:tran-dt
         daed:tran-tstop
@@ -23,18 +25,32 @@
         daed:tran-series
         daed:tran-v
         daed:tran-v-at
+        daed:tran-v-at-t
         daed:tran-i
         daed:tran-i-at
+        daed:tran-i-at-t
         daed:tran-i-series
         daed:tran-iters
-        daed:tran-nr-fail)
+        daed:tran-nr-fail
+        daed:tran-accepted
+        daed:tran-rejected
+        daed:tran-dthist
+        daed:tran-lte
+        daed:tran-reltol
+        daed:tran-abstol)
 
 (require "netlist" all:)
 (require "stamp" all:)
 (require "solve" all:)
 (require "devices" all:)
 
-(define daed:tran-version 3)
+; 4 = issue #18 LTE adaptive timestep
+(define daed:tran-version 4)
+
+(define daed:tran-reltol 1e-3)
+(define daed:tran-abstol 1e-6)
+(define daed:tran-maxsteps 8000)
+(define daed:tran-maxloops 20000)
 
 ; Nearest exact integer (vector indices / make-vector lengths).
 (define (daed:as-int n)
@@ -160,6 +176,90 @@
           0)
         nr))))
 
+; One linear BE time step. Mutates state. Returns #t / #f.
+(define (daed:tran-step-lin! comps dt state)
+  (let ((sys (daed:stamp-system-tran comps dt state))
+        (n-v (daed:n-voltage-unknowns comps)))
+    (let ((N (car sys))
+          (A (car (cdr sys)))
+          (b (car (cdr (cdr sys)))))
+      (if (or (<= N 0) (not (daed:dense-solve! A b N)))
+        #f
+        (begin
+          (daed:update-state-voltages! state b n-v)
+          (daed:update-state-iL! comps state dt)
+          #t)))))
+
+(define (daed:clip-num x lo hi)
+  (if (< x lo)
+    lo
+    (if (> x hi) hi x)))
+
+; Newest-first list → chronological vector.
+(define (daed:rev-list->vec xs)
+  (let ((n 0)
+        (p xs))
+    (let loop ((q xs))
+      (if (null? q)
+        0
+        (begin
+          (set! n (+ n 1))
+          (loop (cdr q)))))
+    (let ((v (make-vector n 0.0))
+          (i (- n 1)))
+      (while (lambda () (>= i 0))
+        (lambda ()
+          (vector-set! v i (car p))
+          (set! p (cdr p))
+          (set! i (- i 1))))
+      v)))
+
+(define (daed:copy-vvec! dst src)
+  (let ((n (vector-length src))
+        (m (vector-length dst))
+        (i 0))
+    (if (< m n)
+      (set! n m)
+      0)
+    (while (lambda () (< i n))
+      (lambda ()
+        (vector-set! dst i (vector-ref src i))
+        (set! i (+ i 1))))
+    dst))
+
+(define (daed:copy-il! dst src comps)
+  (let loop ((cs comps))
+    (if (null? cs)
+      dst
+      (begin
+        (if (equal? (daed:comp-type (car cs)) "L")
+          (let ((nm (daed:comp-name (car cs))))
+            (hash-set! dst nm (hash-ref src nm 0.0)))
+          0)
+        (loop (cdr cs))))))
+
+; BE LTE: (h/2)|ẋ_n − ẋ_{n-1}| / (reltol max(|x_n|,|x_{n-1}|) + abstol)
+(define (daed:lte-err v-new v-old dxdt-old h n-v)
+  (let ((err 0.0)
+        (k 1))
+    (while (lambda () (<= k n-v))
+      (lambda ()
+        (let ((xn (daed:node-voltage v-new k))
+              (xo (daed:node-voltage v-old k))
+              (xp (daed:node-voltage dxdt-old k)))
+          (let ((dxdt (if (<= h 0.0) 0.0 (/ (- xn xo) h))))
+            (let ((lte (* 0.5 (* h (abs (- dxdt xp)))))
+                  (axn (abs xn))
+                  (axo (abs xo)))
+              (let ((amax (if (> axn axo) axn axo)))
+                (let ((den (+ (* daed:tran-reltol amax) daed:tran-abstol)))
+                  (let ((e (if (<= den 0.0) lte (/ lte den))))
+                    (if (> e err)
+                      (set! err e)
+                      0)))))))
+        (set! k (+ k 1))))
+    err))
+
 ; Fixed-step .tran: nsteps is non-negative (int or float; coerced via round).
 ; Samples: t=0 plus nsteps ends → length nsteps+1.
 ; Returns hash: ok, dt, tstop, nsteps, times, series, n_v, final
@@ -181,6 +281,11 @@
         (hash-set! res "iseries" (hash))
         (hash-set! res "n_v" 0)
         (hash-set! res "iters" 0)
+        (hash-set! res "accepted" 0)
+        (hash-set! res "rejected" 0)
+        (hash-set! res "dthist" (make-vector 0 0.0))
+        (hash-set! res "lte" 0.0)
+        (hash-set! res "adapt" #f)
         res)
       ; Coerce float step counts to exact int (vector-ref needs integer indices).
       (let ((n-v (daed:n-voltage-unknowns comps))
@@ -227,17 +332,11 @@
                       (begin
                         (set! ok #f)
                         (set! nr-fail (+ nr-fail 1)))))
-                  (let ((sys (daed:stamp-system-tran comps dt state)))
-                    (let ((N (car sys))
-                          (A (car (cdr sys)))
-                          (b (car (cdr (cdr sys)))))
-                      (if (or (<= N 0) (not (daed:dense-solve! A b N)))
-                        (set! ok #f)
-                        (begin
-                          (daed:update-state-voltages! state b n-v)
-                          (daed:update-state-iL! comps state dt)
-                          (daed:record-step! series times t n-v state k)
-                          (daed:record-iL! iseries comps state k))))))
+                  (if (not (daed:tran-step-lin! comps dt state))
+                    (set! ok #f)
+                    (begin
+                      (daed:record-step! series times t n-v state k)
+                      (daed:record-iL! iseries comps state k))))
                 (set! k (+ k 1)))))
           (hash-set! res "ok" ok)
           (hash-set! res "nsteps" ns)
@@ -249,6 +348,11 @@
           (hash-set! res "iters" iters)
           (hash-set! res "nr_fail" nr-fail)
           (hash-set! res "nr" nl)
+          (hash-set! res "accepted" ns)
+          (hash-set! res "rejected" 0)
+          (hash-set! res "dthist" (make-vector ns dt))
+          (hash-set! res "lte" 0.0)
+          (hash-set! res "adapt" #f)
           res)))))
 
 (define (daed:tran-ok? res)
@@ -307,3 +411,318 @@
 
 (define (daed:tran-nr-fail res)
   (hash-ref res "nr_fail" 0))
+
+(define (daed:tran-accepted res)
+  (hash-ref res "accepted" 0))
+
+(define (daed:tran-rejected res)
+  (hash-ref res "rejected" 0))
+
+(define (daed:tran-dthist res)
+  (hash-ref res "dthist" (make-vector 0 0.0)))
+
+(define (daed:tran-lte res)
+  (hash-ref res "lte" 0.0))
+
+; Linear interpolation of a waveform at time t.
+(define (daed:interp-at times wv t)
+  (let ((n (vector-length times))
+        (m (vector-length wv)))
+    (if (or (<= n 0) (<= m 0))
+      0.0
+      (if (<= n 1)
+        (vector-ref wv 0)
+        (if (<= t (vector-ref times 0))
+          (vector-ref wv 0)
+          (if (>= t (vector-ref times (- n 1)))
+            (vector-ref wv (if (< (- n 1) m) (- n 1) (- m 1)))
+            (let ((i 0)
+                  (found #f)
+                  (out 0.0)
+                  (lim n))
+              (if (> lim m)
+                (set! lim m)
+                0)
+              (while (lambda () (and (not found) (< i (- lim 1))))
+                (lambda ()
+                  (let ((t0 (vector-ref times i))
+                        (t1 (vector-ref times (+ i 1))))
+                    (if (and (<= t0 t) (<= t t1))
+                      (begin
+                        (set! found #t)
+                        (if (<= (- t1 t0) 0.0)
+                          (set! out (vector-ref wv i))
+                          (let ((a (/ (- t t0) (- t1 t0))))
+                            (set! out (+ (vector-ref wv i)
+                                         (* a (- (vector-ref wv (+ i 1))
+                                                 (vector-ref wv i))))))))
+                      (set! i (+ i 1))))))
+              out)))))))
+
+(define (daed:tran-v-at-t res node t)
+  (daed:interp-at (daed:tran-times res) (daed:tran-series res node) t))
+
+(define (daed:tran-i-at-t res name t)
+  (daed:interp-at (daed:tran-times res) (daed:tran-i-series res name) t))
+
+; Adaptive BE .tran from t=0 to tstop. dt0 is the suggested first step.
+; First accepted step skips LTE (no ẋ yet). Later steps grow/shrink on LTE.
+; Returns the same hash as simulate-tran plus accepted / rejected / dthist / lte.
+(define (daed:simulate-tran-adapt ckt tstop dt0)
+  (let ((comps (daed:ckt-comps ckt))
+        (res (hash))
+        (nl #f))
+    (set! nl (daed:has-nonlinear? comps))
+    (hash-set! res "adapt" #t)
+    (hash-set! res "dt" dt0)
+    (if (or (not (number? tstop)) (not (number? dt0))
+            (<= tstop 0.0) (<= dt0 0.0))
+      (begin
+        (hash-set! res "ok" #f)
+        (hash-set! res "tstop" 0.0)
+        (hash-set! res "nsteps" 0)
+        (hash-set! res "times" (make-vector 0 0.0))
+        (hash-set! res "series" (hash))
+        (hash-set! res "iseries" (hash))
+        (hash-set! res "n_v" 0)
+        (hash-set! res "iters" 0)
+        (hash-set! res "nr_fail" 0)
+        (hash-set! res "accepted" 0)
+        (hash-set! res "rejected" 0)
+        (hash-set! res "dthist" (make-vector 0 0.0))
+        (hash-set! res "lte" 0.0)
+        res)
+      (let ((n-v (daed:n-voltage-unknowns comps))
+            (state (daed:make-tran-state comps))
+            (series (hash))
+            (iseries (hash))
+            (times-acc '())
+            (dt-acc '())
+            (ok #t)
+            (going #t)
+            (t 0.0)
+            (h dt0)
+            (accepted 0)
+            (rejected 0)
+            (iters 0)
+            (nr-fail 0)
+            (loops 0)
+            (have-dot #f)
+            (just-rej #f)
+            (last-lte 0.0)
+            (dtmin (* tstop 1e-6))
+            (dtmax (* tstop 0.25))
+            (v-now #f)
+            (v-old #f)
+            (dxdt-old #f)
+            (v-save #f)
+            (il-now #f)
+            (il-save (hash)))
+        (if (< dtmin (* dt0 1e-6))
+          (set! dtmin (* dt0 1e-6))
+          0)
+        (if (> dtmax tstop)
+          (set! dtmax tstop)
+          0)
+        (if (> h dtmax)
+          (set! h dtmax)
+          0)
+        (set! v-now (hash-ref state "v" (make-vector 1 0.0)))
+        (set! il-now (hash-ref state "iL" (hash)))
+        (set! v-old (daed:copy-vec v-now))
+        (set! dxdt-old (make-vector (vector-length v-now) 0.0))
+        (set! v-save (daed:copy-vec v-now))
+        (let ((node 1))
+          (while (lambda () (<= node n-v))
+            (lambda ()
+              (hash-set! series (number->string node) '())
+              (set! node (+ node 1)))))
+        (let loop ((cs comps))
+          (if (null? cs)
+            0
+            (begin
+              (if (equal? (daed:comp-type (car cs)) "L")
+                (hash-set! iseries (daed:comp-name (car cs)) '())
+                0)
+              (loop (cdr cs)))))
+        (set! times-acc (cons 0.0 times-acc))
+        (let ((node 1))
+          (while (lambda () (<= node n-v))
+            (lambda ()
+              (let ((key (number->string node)))
+                (hash-set! series key
+                  (cons (daed:node-voltage v-now node)
+                        (hash-ref series key '()))))
+              (set! node (+ node 1)))))
+        (let loop ((cs comps))
+          (if (null? cs)
+            0
+            (begin
+              (if (equal? (daed:comp-type (car cs)) "L")
+                (let ((nm (daed:comp-name (car cs))))
+                  (hash-set! iseries nm
+                    (cons (hash-ref il-now nm 0.0)
+                          (hash-ref iseries nm '()))))
+                0)
+              (loop (cdr cs)))))
+        (while (lambda () (and ok going))
+          (lambda ()
+            (set! loops (+ loops 1))
+            (let ((remain (- tstop t)))
+              (if (or (>= loops daed:tran-maxloops)
+                      (>= accepted daed:tran-maxsteps)
+                      (<= remain (* 0.5 dtmin)))
+                (set! going #f)
+                (begin
+                  (if (> h remain)
+                    (set! h remain)
+                    0)
+                  (if (> h dtmax)
+                    (set! h dtmax)
+                    0)
+                  (if (and (< h dtmin) (> remain dtmin))
+                    (set! h dtmin)
+                    0)
+                  (if (<= h 0.0)
+                    (set! going #f)
+                    (begin
+                      (daed:copy-vvec! v-save v-now)
+                      (daed:copy-il! il-save il-now comps)
+                      (let ((solved #f)
+                            (nr-it 0))
+                        (if nl
+                          (let ((nr (daed:tran-step-nr! comps h state)))
+                            (set! nr-it (hash-ref nr "iters" 0))
+                            (set! iters (+ iters nr-it))
+                            (set! solved (hash-ref nr "ok" #f))
+                            (if (not solved)
+                              (set! nr-fail (+ nr-fail 1))
+                              0))
+                          (set! solved (daed:tran-step-lin! comps h state)))
+                        (if (not solved)
+                          (begin
+                            (daed:copy-vvec! v-now v-save)
+                            (daed:copy-il! il-now il-save comps)
+                            (set! rejected (+ rejected 1))
+                            (set! just-rej #t)
+                            (set! h (* h 0.5))
+                            (if (< h dtmin)
+                              (begin
+                                (set! ok #f)
+                                (set! going #f))
+                              0))
+                          (begin
+                            (set! last-lte
+                              (if have-dot
+                                (daed:lte-err v-now v-old dxdt-old h n-v)
+                                0.0))
+                            (let ((accept #f))
+                              (if (not have-dot)
+                                (set! accept #t)
+                                (if (<= last-lte 1.0)
+                                  (set! accept #t)
+                                  (if (or (<= h (* 1.01 dtmin))
+                                          (<= remain (* 1.01 dtmin)))
+                                    (set! accept #t)
+                                    (set! accept #f))))
+                              (if accept
+                                (begin
+                                  (let ((k 1))
+                                    (while (lambda () (<= k n-v))
+                                      (lambda ()
+                                        (let ((xn (daed:node-voltage v-now k))
+                                              (xo (daed:node-voltage v-old k)))
+                                          (vector-set! dxdt-old k
+                                            (if (<= h 0.0)
+                                              0.0
+                                              (/ (- xn xo) h)))
+                                          (vector-set! v-old k xn))
+                                        (set! k (+ k 1)))))
+                                  (set! have-dot #t)
+                                  (set! t (+ t h))
+                                  (set! accepted (+ accepted 1))
+                                  (set! dt-acc (cons h dt-acc))
+                                  (set! times-acc (cons t times-acc))
+                                  (let ((node 1))
+                                    (while (lambda () (<= node n-v))
+                                      (lambda ()
+                                        (let ((key (number->string node)))
+                                          (hash-set! series key
+                                            (cons (daed:node-voltage v-now node)
+                                                  (hash-ref series key '()))))
+                                        (set! node (+ node 1)))))
+                                  (let loop ((cs comps))
+                                    (if (null? cs)
+                                      0
+                                      (begin
+                                        (if (equal? (daed:comp-type (car cs)) "L")
+                                          (let ((nm (daed:comp-name (car cs))))
+                                            (hash-set! iseries nm
+                                              (cons (hash-ref il-now nm 0.0)
+                                                    (hash-ref iseries nm '()))))
+                                          0)
+                                        (loop (cdr cs)))))
+                                  (let ((fac 2.0)
+                                        (e last-lte))
+                                    (if (and have-dot (> e 1e-12))
+                                      (set! fac (/ 0.9 (sqrt e)))
+                                      0)
+                                    (set! fac (daed:clip-num fac 0.25 2.0))
+                                    (if just-rej
+                                      (if (> fac 1.0)
+                                        (set! fac 1.0)
+                                        0)
+                                      0)
+                                    (set! h (* h fac))
+                                    (set! just-rej #f)))
+                                (begin
+                                  (daed:copy-vvec! v-now v-save)
+                                  (daed:copy-il! il-now il-save comps)
+                                  (set! rejected (+ rejected 1))
+                                  (set! just-rej #t)
+                                  (let ((fac 0.5)
+                                        (e last-lte))
+                                    (if (> e 1e-12)
+                                      (set! fac (/ 0.9 (sqrt e)))
+                                      0)
+                                    (set! h (* h (daed:clip-num fac 0.25 0.9)))
+                                    (if (< h dtmin)
+                                      (set! h dtmin)
+                                      0)))))))))))))))
+        (let ((s-out (hash))
+              (i-out (hash))
+              (node 1))
+          (while (lambda () (<= node n-v))
+            (lambda ()
+              (let ((key (number->string node)))
+                (hash-set! s-out key
+                  (daed:rev-list->vec (hash-ref series key '()))))
+              (set! node (+ node 1))))
+          (let loop ((cs comps))
+            (if (null? cs)
+              0
+              (begin
+                (if (equal? (daed:comp-type (car cs)) "L")
+                  (let ((nm (daed:comp-name (car cs))))
+                    (hash-set! i-out nm
+                      (daed:rev-list->vec (hash-ref iseries nm '()))))
+                  0)
+                (loop (cdr cs)))))
+          (hash-set! res "ok" ok)
+          (hash-set! res "tstop" (if ok tstop t))
+          (hash-set! res "nsteps" accepted)
+          (hash-set! res "times" (daed:rev-list->vec times-acc))
+          (hash-set! res "series" s-out)
+          (hash-set! res "iseries" i-out)
+          (hash-set! res "n_v" n-v)
+          (hash-set! res "final" state)
+          (hash-set! res "iters" iters)
+          (hash-set! res "nr_fail" nr-fail)
+          (hash-set! res "nr" nl)
+          (hash-set! res "accepted" accepted)
+          (hash-set! res "rejected" rejected)
+          (hash-set! res "dthist" (daed:rev-list->vec dt-acc))
+          (hash-set! res "lte" last-lte)
+          (hash-set! res "dtmin" dtmin)
+          (hash-set! res "dtmax" dtmax)
+          res)))))

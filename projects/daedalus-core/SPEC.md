@@ -83,3 +83,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Agent mutate + snapshot (circuit/metrics/.op) + topology reconnect (issue #15, probe 14)
 - [x] Nonlinear `.op` convergence helpers (line-search, guess, diagnostics; issue #16, probe 15)
 - [x] Nonlinear denseness probes + ngspice comparison (issue #17, probe 16)
+- [x] LTE adaptive timestep for `.tran` (issue #18, probe 17)

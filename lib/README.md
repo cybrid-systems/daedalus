@@ -9,7 +9,7 @@
 | `stamp.aura` | 1–2 / M0 | MNA stamp: DC + BE + controlled sources |
 | `devices.aura` | 5 | Shockley diode + Ebers-Moll NPN + NR residual/Jacobian |
 | `solve.aura` | 1 / 5 / M0 / M1 | Dense GE + linear `.op` + NR (line-search, hist, gmin) |
-| `tran.aura` | 2 / 5 / M0 | Fixed-step BE `.tran`; inductor current series; NR per step |
+| `tran.aura` | 2 / 5 / M0 / M2 | Fixed-step BE `.tran` + LTE adaptive step control |
 | `probe.aura` | 1–2 | Node voltage / series query |
 | `mutate-circuit.aura` | 3–5 / M0 | Value + topology mutate; circuit snapshot (incl. D/Q / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |

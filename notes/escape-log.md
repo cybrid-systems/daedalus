@@ -83,6 +83,11 @@ No leave from \(V_A\) on the probe path. Frozen ngspice numbers live in
 `examples/16-nl-op-suite/ref/ngspice.tsv`. Live `ngspice -b` is an optional
 host oracle (`scripts/compare-ngspice.sh`), same class as the #13 decks.
 
+## Issue #18 (LTE adaptive .tran)
+
+No leave from \(V_A\). Adaptive BE uses the existing companion stamp + dense
+GE / NR. Fixed-step `simulate-tran` is unchanged.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

@@ -56,10 +56,14 @@
         ; tran
         daed:tran-version
         daed:make-tran-state daed:nsteps-for daed:as-int daed:simulate-tran
+        daed:simulate-tran-adapt
         daed:tran-ok? daed:tran-dt daed:tran-tstop daed:tran-nsteps
         daed:tran-times daed:tran-series daed:tran-v daed:tran-v-at
-        daed:tran-i daed:tran-i-at daed:tran-i-series
+        daed:tran-v-at-t
+        daed:tran-i daed:tran-i-at daed:tran-i-at-t daed:tran-i-series
         daed:tran-iters daed:tran-nr-fail
+        daed:tran-accepted daed:tran-rejected daed:tran-dthist daed:tran-lte
+        daed:tran-reltol daed:tran-abstol
         ; probe
         daed:probe-version daed:v daed:i daed:v-ground
         daed:check-voltage

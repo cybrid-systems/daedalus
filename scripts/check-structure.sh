@@ -65,6 +65,8 @@ required=(
   "examples/15-nr-helpers/README.md"
   "examples/16-nl-op-suite/main.aura"
   "examples/16-nl-op-suite/README.md"
+  "examples/17-adapt-tran/main.aura"
+  "examples/17-adapt-tran/README.md"
   "examples/16-nl-op-suite/ref/ngspice.tsv"
   "examples/16-nl-op-suite/spice/diode-bias.cir"
   "examples/16-nl-op-suite/spice/diode-series.cir"

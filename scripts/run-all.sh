@@ -21,6 +21,7 @@ PROBES=(
   14-mutate-rollback
   15-nr-helpers
   16-nl-op-suite
+  17-adapt-tran
 )
 
 pass=0
