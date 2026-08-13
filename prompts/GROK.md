@@ -60,10 +60,11 @@ Primary objects under test:
 - Probe `25-spice-export` — FlatAST → SPICE export, escapes=0 (issue #26)
 - Probe `26-native-hotswap` — C++ GE hot-swap + fallback (issue #28); default backend stays pure
 - Probe `27-ffi-bind` — `c-load` / `c-func` + structured failures (issue #30)
+- Probe `28-heph-wrap` — `rebind-safe` / `with-escape` / `own-check` (issue #31)
 - Native ABI: `extern "C"` + workspace variant + CMake/g++ (`scripts/check-native-abi.sh`, issue #29)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
-- Roadmap: M0–M4 done (issue #27). M5 #28–#30 landed; #31–#34 remain.
+- Roadmap: M0–M4 done (issue #27). M5 #28–#31 landed; #32–#34 remain.
 
 **Post-M4:** M5 C++ hot-swap (metered); optional multi-agent compose, PNP / astable, richer viz.
 

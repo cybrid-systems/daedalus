@@ -96,3 +96,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Native C++ dense-solve hot-swap + fallback (issue #28, probe 26)
 - [x] ABI + build conventions for C++ kernels (issue #29)
 - [x] Aura FFI binding layer (`c-load` / `c-func`, issue #30, probe 27)
+- [x] Hephaestus-pattern rebind-safe + escape metering (issue #31, probe 28)

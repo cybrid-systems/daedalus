@@ -39,6 +39,7 @@ PROBES=(
   25-spice-export
   26-native-hotswap
   27-ffi-bind
+  28-heph-wrap
 )
 
 pass=0

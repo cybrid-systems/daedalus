@@ -16,6 +16,14 @@
         daed:solve-rebind-ok?
         daed:solve-rebind-reason
         daed:solve-rebind-prev
+        daed:solve-kernel-name
+        daed:with-escape
+        daed:rebind-safe
+        daed:kernel-snapshot
+        daed:kernel-restore!
+        daed:own-check
+        daed:own-ok?
+        daed:native-bound?
         daed:dense-solve-native!
         daed:native-set-fail!
         daed:native-calls
@@ -32,7 +40,10 @@
 
 (require "ffi" all:)
 
-(define daed:native-version 2)
+(define daed:native-version 3)
+
+; Logical kernel name (Hephaestus kscale analogue). Backends: "pure" | "native".
+(define daed:solve-kernel-name "solve-mna")
 
 (define *daed-solve-backend* "pure")
 (define *daed-native-lib* #f)
@@ -89,6 +100,11 @@
         *daed-native-solve*
         #f))))
 
+(define (daed:native-bound?)
+  (if *daed-native-solve*
+    #t
+    #f))
+
 (define (daed:native-ready?)
   (if *daed-native-solve*
     #t
@@ -106,13 +122,18 @@
           (disp 1 (if on 1 0) 0 0)
           #t)))))
 
+; Hephaestus with-escape: note then run thunk. Eval failure → #f.
+(define (daed:with-escape reason thunk)
+  (daed:native-escape! reason)
+  (try (thunk) (catch (e) #f)))
+
 ; Copy A,b → Opaque, call C++, copy b back on rc=0.
 (define (daed:dense-solve-native! A b n)
   (if (not (daed:native-ready?))
     #f
-    (begin
-      (daed:native-escape! "native-dense-solve")
-      (daed:ffi-ok? (daed:ffi-solve-dense! A b n)))))
+    (daed:with-escape "daed-solve-dense"
+      (lambda ()
+        (daed:ffi-ok? (daed:ffi-solve-dense! A b n))))))
 
 ; Hephaestus rebind-safe pattern (no heph lib required).
 ; kind: "pure" | "native"
@@ -149,5 +170,78 @@
 
 (define (daed:solve-rebind-prev r)
   (hash-ref r "prev" "pure"))
+
+(define (daed:kernel-snapshot)
+  (let ((s (hash)))
+    (hash-set! s "backend" *daed-solve-backend*)
+    s))
+
+(define (daed:kernel-restore! snap)
+  (if (not snap)
+    #f
+    (begin
+      (set! *daed-solve-backend* (hash-ref snap "backend" "pure"))
+      (if (equal? *daed-solve-backend* "pure")
+        (daed:native-set-fail! #f)
+        #t)
+      *daed-solve-backend*)))
+
+; Hephaestus rebind-safe, circuit-domain (no heph lib / mutate:rebind).
+; name: "solve-mna" or "daed:dense-solve!"
+; kind: "pure" | "native"
+; On bad name/kind or failed switch, restore the backend snapshot.
+(define (daed:rebind-safe name kind)
+  (let ((res (hash))
+        (snap (daed:kernel-snapshot))
+        (nm (if (string? name) name ""))
+        (want (if (string? kind) kind ""))
+        (r #f))
+    (hash-set! res "ok" #f)
+    (hash-set! res "prev" (hash-ref snap "backend" "pure"))
+    (hash-set! res "kind" want)
+    (hash-set! res "name" nm)
+    (hash-set! res "reason" "init")
+    (hash-set! res "snap" snap)
+    (if (and (not (equal? nm "solve-mna"))
+             (not (equal? nm "daed:dense-solve!")))
+      (begin
+        (hash-set! res "reason" "bad-kernel")
+        res)
+      (if (and (not (equal? want "pure"))
+               (not (equal? want "native")))
+        (begin
+          (hash-set! res "reason" "bad-kind")
+          res)
+        (begin
+          (set! r (daed:solve-rebind! want))
+          (if (daed:solve-rebind-ok? r)
+            (begin
+              (hash-set! res "ok" #t)
+              (hash-set! res "reason" "applied")
+              res)
+            (begin
+              (daed:kernel-restore! snap)
+              (hash-set! res "reason" (daed:solve-rebind-reason r))
+              res)))))))
+
+; Circuit-domain ownership: known backend, native only if bound.
+; Does not call native-ready? (that would c-load on the pure path).
+(define (daed:own-check)
+  (let ((res (hash))
+        (be *daed-solve-backend*)
+        (known #f)
+        (ready #t))
+    (set! known (or (equal? be "pure") (equal? be "native")))
+    (if (equal? be "native")
+      (set! ready (daed:native-bound?))
+      #t)
+    (hash-set! res "backend" be)
+    (hash-set! res "ready" ready)
+    (hash-set! res "known-backend" known)
+    (hash-set! res "ok" (and known ready))
+    res))
+
+(define (daed:own-ok? r)
+  (hash-ref r "ok" #f))
 
 (daed:ffi-on-call! daed:native-escape!)

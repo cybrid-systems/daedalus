@@ -52,6 +52,9 @@
         daed:solve-version daed:dense-solve! daed:dense-solve-pure! daed:newton-solve
         daed:native-version daed:native-ready? daed:solve-backend
         daed:solve-rebind! daed:solve-rebind-ok? daed:solve-rebind-reason
+        daed:solve-kernel-name daed:with-escape daed:rebind-safe
+        daed:kernel-snapshot daed:kernel-restore! daed:own-check daed:own-ok?
+        daed:native-bound?
         daed:dense-solve-native! daed:native-set-fail! daed:native-calls
         daed:ffi-version daed:load-kernels daed:bind-solve-dense
         daed:bind-c-func daed:ffi-ok? daed:ffi-reason daed:ffi-error

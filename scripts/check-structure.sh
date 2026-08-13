@@ -104,6 +104,8 @@ required=(
   "examples/26-native-hotswap/README.md"
   "examples/27-ffi-bind/main.aura"
   "examples/27-ffi-bind/README.md"
+  "examples/28-heph-wrap/main.aura"
+  "examples/28-heph-wrap/README.md"
   "scripts/roundtrip-spice.sh"
   "examples/16-nl-op-suite/ref/ngspice.tsv"
   "examples/16-nl-op-suite/spice/diode-bias.cir"

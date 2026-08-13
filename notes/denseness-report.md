@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-14  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–27** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–27) is a metered opt-in escape.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–28** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–28) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -60,6 +60,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [25](../examples/25-spice-export/) | FlatAST → SPICE export (issue #26) | **PASS** | 0 | 0 |
 | [26](../examples/26-native-hotswap/) | C++ GE hot-swap (issue #28) | **PASS** | 0 | metered |
 | [27](../examples/27-ffi-bind/) | `c-load` / `c-func` bind (issue #30) | **PASS** | 0 | metered |
+| [28](../examples/28-heph-wrap/) | Hephaestus rebind-safe (issue #31) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -187,6 +188,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - One live `c-func` (`daed_dispatch`) — host `cid < n_ffi` steals Aura closures.
 - `lib-id=-1` is accepted; after `c-load` (RTLD_LOCAL) it reuses the last handle rather than `RTLD_DEFAULT`.
 - Probe 27: missing lib + bad handle fail structured; 2×2 `(2,1)`; `daed:V` still works.
+
+### Issue #31 narrative (Hephaestus wrapper)
+
+- Compose `heph:rebind-safe` / `with-escape` / `own-check` without requiring the heph lib.
+- Logical kernel `solve-mna`; `daed:with-escape` `"daed-solve-dense"` meters each native GE.
+- Bad rebind restores the backend snapshot; poison still flips to `"pure"`.
+- Probe 28: pure E=0; native match; bad-kernel/bad-kind unchanged; restore snap → pure.
 
 ## Judgment
 

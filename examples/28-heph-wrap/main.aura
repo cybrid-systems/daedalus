@@ -1,0 +1,190 @@
+; examples/28-heph-wrap/main.aura
+;
+; Milestone 5 / issue #31 — Hephaestus-pattern kernel wrapper.
+; Compose heph:rebind-safe / with-escape / own-check / escape-count
+; on the circuit solver (no heph lib; same as agent vs Aether).
+;
+;   A. Pure solve-mna; E=0; own-check ok
+;   B. rebind-safe → native; same v2; escape +1
+;   C. Bad rebind rolls back (backend unchanged)
+;   D. Poison native → auto-fallback to pure
+;   E. kernel-restore! returns to the snap taken before native
+;
+; Axes: rebind-safe + with-escape + own-check
+; Default backend stays pure (other probes E=0)
+;
+; Build first: ./scripts/build-native.sh
+; Run: ./scripts/run-aura.sh examples/28-heph-wrap/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 28-heph-wrap: rebind-safe + escape meter ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " native=")
+(display daed:native-version)
+(display " kernel=")
+(display daed:solve-kernel-name)
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:native-version)
+                                     (>= daed:native-version 3)
+                                     (equal? daed:solve-kernel-name "solve-mna")
+                                     (equal? (daed:solve-backend) "pure"))))
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+(define want (/ 10.0 3.0))
+
+; ── A. Pure ──
+(define own0 (daed:own-check))
+(define a-own (daed:check-true (daed:own-ok? own0)))
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v0 (daed:v op0 2))
+(define a-ok (daed:check-true (daed:op-ok? op0)))
+(define a-v (daed:check-rel v0 want 1e-6 1e-9))
+(define a-e (daed:check-eq (daed:escape-count) 0))
+
+(display "A pure v2=")
+(display v0)
+(display " escapes=")
+(display (daed:escape-count))
+(display " own=")
+(display (daed:own-ok? own0))
+(newline)
+
+; ── B. rebind-safe native ──
+(define snap0 (daed:kernel-snapshot))
+(define rb (daed:rebind-safe "solve-mna" "native"))
+(define b-rb (daed:check-true (and (daed:solve-rebind-ok? rb)
+                                   (equal? (daed:solve-backend) "native"))))
+(define e1 (daed:escape-count))
+(define op1 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v1 (daed:v op1 2))
+(define b-ok (daed:check-true (daed:op-ok? op1)))
+(define b-v (daed:check-rel v1 want 1e-6 1e-9))
+(define b-match (daed:check-rel v1 v0 1e-9 1e-12))
+(define b-esc (daed:check-true (> (daed:escape-count) e1)))
+(define b-calls (daed:check-true (>= (daed:native-calls) 1)))
+(define own1 (daed:own-check))
+(define b-own (daed:check-true (daed:own-ok? own1)))
+
+(display "B native v2=")
+(display v1)
+(display " escapes=")
+(display (daed:escape-count))
+(display " calls=")
+(display (daed:native-calls))
+(newline)
+
+; ── C. Bad rebind rolls back ──
+(define bad1 (daed:rebind-safe "not-a-kernel" "native"))
+(define c-name (daed:check-true (and (not (daed:solve-rebind-ok? bad1))
+                                     (equal? (daed:solve-rebind-reason bad1)
+                                             "bad-kernel")
+                                     (equal? (daed:solve-backend) "native"))))
+(define bad2 (daed:rebind-safe "solve-mna" "bogus"))
+(define c-kind (daed:check-true (and (not (daed:solve-rebind-ok? bad2))
+                                     (equal? (daed:solve-rebind-reason bad2)
+                                             "bad-kind")
+                                     (equal? (daed:solve-backend) "native"))))
+
+(display "C bad-kernel=")
+(display (daed:solve-rebind-reason bad1))
+(display " bad-kind=")
+(display (daed:solve-rebind-reason bad2))
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+; ── D. Poison → fallback ──
+(define poi (daed:native-set-fail! #t))
+(define d-poi (daed:check-true poi))
+(define op2 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2 (daed:v op2 2))
+(define d-ok (daed:check-true (daed:op-ok? op2)))
+(define d-v (daed:check-rel v2 want 1e-6 1e-9))
+(define d-back (daed:check-true (equal? (daed:solve-backend) "pure")))
+
+(display "D fallback backend=")
+(display (daed:solve-backend))
+(display " v2=")
+(display v2)
+(newline)
+
+; ── E. Restore kernel snapshot taken in B ──
+(define rb-n (daed:rebind-safe "solve-mna" "native"))
+(define e-rb (daed:check-true (and (daed:solve-rebind-ok? rb-n)
+                                   (equal? (daed:solve-backend) "native"))))
+(define rst (daed:kernel-restore! snap0))
+(define e-rst (daed:check-true (equal? (daed:solve-backend) "pure")))
+(define e-before (daed:escape-count))
+(define op3 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define e-v (daed:check-rel (daed:v op3 2) want 1e-6 1e-9))
+(define e-pure (daed:check-eq (daed:escape-count) e-before))
+(define own2 (daed:own-check))
+(define e-own (daed:check-true (and (daed:own-ok? own2)
+                                    (equal? (daed:solve-backend) "pure"))))
+
+(display "E restore backend=")
+(display (daed:solve-backend))
+(display " v2=")
+(display (daed:v op3 2))
+(display " escapes=")
+(display (daed:escape-count))
+(newline)
+
+(define all-ok
+  (and ver-ok
+       a-own a-ok a-v a-e
+       b-rb b-ok b-v b-match b-esc b-calls b-own
+       c-name c-kind
+       d-poi d-ok d-v d-back
+       e-rb e-rst e-v e-pure e-own
+       (= (daed:stats-ref "correctness_fail") 0)
+       (equal? (daed:solve-backend) "pure")))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: heph-wrap rebind-safe + escape meter (escapes=")
+    (display (daed:escape-count))
+    (display ")")
+    (newline)
+    (display "RESULT pass example=28-heph-wrap escapes=")
+    (display (daed:escape-count))
+    (newline))
+  (begin
+    (display "FAIL: heph-wrap denseness probe")
+    (newline)
+    (display "RESULT fail example=28-heph-wrap")
+    (newline)
+    (display "  a-e=")
+    (display a-e)
+    (display " b-rb=")
+    (display b-rb)
+    (display " b-esc=")
+    (display b-esc)
+    (display " c-name=")
+    (display c-name)
+    (display " d-back=")
+    (display d-back)
+    (display " e-rst=")
+    (display e-rst)
+    (newline)))
