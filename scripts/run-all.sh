@@ -29,6 +29,7 @@ PROBES=(
   22-monte-carlo
   23-agent-evolve
   24-topo-mutate
+  25-spice-export
 )
 
 pass=0
@@ -65,8 +66,22 @@ else
   failed_list+=("ngspice-compare")
 fi
 
+echo "======== export-roundtrip ========"
+if ./scripts/roundtrip-spice.sh 2>&1 | tee /tmp/daedalus-export-roundtrip.log | tail -20; then
+  if rg -q "RESULT pass|RESULT skip" /tmp/daedalus-export-roundtrip.log 2>/dev/null \
+     || grep -Eq "RESULT pass|RESULT skip" /tmp/daedalus-export-roundtrip.log; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    failed_list+=("export-roundtrip")
+  fi
+else
+  fail=$((fail + 1))
+  failed_list+=("export-roundtrip")
+fi
+
 echo "======== summary ========"
-echo "pass=$pass fail=$fail total=$(( ${#PROBES[@]} + 1 )) (probes=${#PROBES[@]} + ngspice-compare)"
+echo "pass=$pass fail=$fail total=$(( ${#PROBES[@]} + 2 )) (probes=${#PROBES[@]} + ngspice-compare + export-roundtrip)"
 if [[ "$fail" -ne 0 ]]; then
   echo "failed: ${failed_list[*]}" >&2
   exit 1

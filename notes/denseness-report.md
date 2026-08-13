@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0–M4** — probes **00–03, 05–24** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0–M4** — probes **00–03, 05–25** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -57,6 +57,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [22](../examples/22-monte-carlo/) | Monte Carlo + yield (issue #23) | **PASS** | 0 | 0 |
 | [23](../examples/23-agent-evolve/) | spec-driven agent search (issue #24) | **PASS** | 0 | 0 |
 | [24](../examples/24-topo-mutate/) | topology mutate + family search (issue #25) | **PASS** | 0 | 0 |
+| [25](../examples/25-spice-export/) | FlatAST → SPICE export (issue #26) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -156,6 +157,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - `topology-ok?` rejects invalid graphs (dup name, `R≤0`, F/H dangling ctrl); snap+restore on fail.
 - `restore-circuit!` now replaces the component list so add/remove rolls back.
 - `topo-search!` tries a family of ops from the origin snapshot and keeps the best spec.
+
+### Issue #26 narrative (SPICE export)
+
+- `spice.aura`: `circuit->spice` / `circuit->spice-tran` emit a deterministic ngspice deck.
+- Models carry `IS`/`N`/`BF`/`VTO`/`KP`. `T=Tnom` maps to `tnom=temp=28.555` (Vt match).
+- Probe 25: divider + agent-tuned R2 + D/Q/M models + write `out/*.cir`.
+- Live `scripts/roundtrip-spice.sh` is an optional host oracle (same class as #17).
 
 ## Judgment
 

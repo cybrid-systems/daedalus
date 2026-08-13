@@ -91,3 +91,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Monte Carlo + yield (issue #23, probe 22)
 - [x] Spec-driven agent parameter search (issue #24, probe 23)
 - [x] Limited topology mutation surface (issue #25, probe 24)
+- [x] SPICE export for sign-off (issue #26, probe 25)

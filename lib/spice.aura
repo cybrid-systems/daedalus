@@ -1,0 +1,302 @@
+; lib/spice.aura — Export FlatAST → SPICE netlist (issue #26 / M4)
+;
+; (require "spice" all:)
+;
+; Deterministic ngspice/LTspice deck from the live circuit. Models carry
+; enough IS/N/BF/VTO/KP for sign-off. T is mapped so T=Tnom matches the
+; educational Vt=26 mV cards used in probe 16. Pure Aura.
+
+(export daed:spice-version
+        daed:spice-subset
+        daed:spice-tnom
+        daed:spice-temp
+        daed:circuit->spice
+        daed:circuit->spice-tran
+        daed:write-spice!)
+
+(require "netlist" all:)
+(require "devices" all:)
+
+(define daed:spice-version 1)
+
+(define daed:spice-subset
+  "R C L V I D(Shockley) Q(NPN Ebers-Moll) M(NMOS Level-1) E G F H")
+
+; Educational T that makes ngspice kT/q ≈ 26 mV (probe 16 / #17).
+(define daed:spice-t-edu 28.555)
+
+(define (daed:spice-num x)
+  (if (number? x)
+    (number->string x)
+    "0"))
+
+(define (daed:spice-starts? name up lo)
+  (and (string? name)
+       (> (string-length name) 0)
+       (let ((c (substring name 0 1)))
+         (or (equal? c up) (equal? c lo)))))
+
+(define (daed:spice-inst up lo name)
+  (if (daed:spice-starts? name up lo)
+    name
+    (string-append up (if (string? name) name "x"))))
+
+(define (daed:spice-tnom)
+  daed:spice-t-edu)
+
+; Map Daedalus T so T=Tnom → 28.555 °C (Vt match). Offset tracks set-temp!.
+(define (daed:spice-temp)
+  (+ daed:spice-t-edu (- daed:temp daed:tnom)))
+
+(define (daed:spice-node n)
+  (if (number? n)
+    (daed:spice-num n)
+    "0"))
+
+(define (daed:spice-line-R c)
+  (string-append (daed:spice-inst "R" "r" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-C c)
+  (string-append (daed:spice-inst "C" "c" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-L c)
+  (string-append (daed:spice-inst "L" "l" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-V c)
+  (string-append (daed:spice-inst "V" "v" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " DC "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-I c)
+  (string-append (daed:spice-inst "I" "i" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " DC "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-mod-d name)
+  (string-append "D" name))
+
+(define (daed:spice-mod-q name)
+  (string-append "Q" name))
+
+(define (daed:spice-mod-m name)
+  (string-append "M" name))
+
+(define (daed:spice-line-D c)
+  (let ((nm (daed:comp-name c)))
+    (string-append (daed:spice-inst "D" "d" nm) " "
+                   (daed:spice-node (daed:comp-n1 c)) " "
+                   (daed:spice-node (daed:comp-n2 c)) " "
+                   (daed:spice-mod-d nm) "\n")))
+
+(define (daed:spice-line-Q c)
+  (let ((nm (daed:comp-name c)))
+    (string-append (daed:spice-inst "Q" "q" nm) " "
+                   (daed:spice-node (daed:comp-n1 c)) " "
+                   (daed:spice-node (daed:comp-n2 c)) " "
+                   (daed:spice-node (daed:comp-n3 c)) " "
+                   (daed:spice-mod-q nm) "\n")))
+
+(define (daed:spice-line-M c)
+  (let ((nm (daed:comp-name c))
+        (ns (daed:spice-node (daed:comp-n3 c))))
+    (string-append (daed:spice-inst "M" "m" nm) " "
+                   (daed:spice-node (daed:comp-n1 c)) " "
+                   (daed:spice-node (daed:comp-n2 c)) " "
+                   ns " " ns " "
+                   (daed:spice-mod-m nm)
+                   " W=" (daed:spice-num (hash-ref c "w" 20e-6))
+                   " L=" (daed:spice-num (hash-ref c "l" 2e-6)) "\n")))
+
+(define (daed:spice-line-E c)
+  (string-append (daed:spice-inst "E" "e" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-node (daed:comp-n3 c)) " "
+                 (daed:spice-node (daed:comp-n4 c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-G c)
+  (string-append (daed:spice-inst "G" "g" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-node (daed:comp-n3 c)) " "
+                 (daed:spice-node (daed:comp-n4 c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-F c)
+  (string-append (daed:spice-inst "F" "f" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-inst "V" "v" (daed:comp-ctrl c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-line-H c)
+  (string-append (daed:spice-inst "H" "h" (daed:comp-name c)) " "
+                 (daed:spice-node (daed:comp-n1 c)) " "
+                 (daed:spice-node (daed:comp-n2 c)) " "
+                 (daed:spice-inst "V" "v" (daed:comp-ctrl c)) " "
+                 (daed:spice-num (daed:comp-value c)) "\n"))
+
+(define (daed:spice-device c)
+  (let ((ty (daed:comp-type c)))
+    (if (equal? ty "R")
+      (daed:spice-line-R c)
+      (if (equal? ty "C")
+        (daed:spice-line-C c)
+        (if (equal? ty "L")
+          (daed:spice-line-L c)
+          (if (equal? ty "V")
+            (daed:spice-line-V c)
+            (if (equal? ty "I")
+              (daed:spice-line-I c)
+              (if (equal? ty "D")
+                (daed:spice-line-D c)
+                (if (equal? ty "Q")
+                  (daed:spice-line-Q c)
+                  (if (equal? ty "M")
+                    (daed:spice-line-M c)
+                    (if (equal? ty "E")
+                      (daed:spice-line-E c)
+                      (if (equal? ty "G")
+                        (daed:spice-line-G c)
+                        (if (equal? ty "F")
+                          (daed:spice-line-F c)
+                          (if (equal? ty "H")
+                            (daed:spice-line-H c)
+                            (string-append "* skipped " ty "\n")))))))))))))))
+
+(define (daed:spice-model c)
+  (let ((ty (daed:comp-type c))
+        (nm (daed:comp-name c)))
+    (if (equal? ty "D")
+      (string-append ".model " (daed:spice-mod-d nm)
+                     " D(IS=" (daed:spice-num (daed:comp-value c))
+                     " N=" (daed:spice-num (hash-ref c "n" 1.0)) ")\n")
+      (if (equal? ty "Q")
+        (string-append ".model " (daed:spice-mod-q nm)
+                       " NPN(IS=" (daed:spice-num (daed:comp-value c))
+                       " BF=" (daed:spice-num (hash-ref c "bf" 100.0))
+                       " BR=" (daed:spice-num (hash-ref c "br" 1.0)) ")\n")
+        (if (equal? ty "M")
+          (string-append ".model " (daed:spice-mod-m nm)
+                         " NMOS(LEVEL=1 VTO="
+                         (daed:spice-num (hash-ref c "vto" 0.8))
+                         " KP=" (daed:spice-num (daed:comp-value c))
+                         " LAMBDA=" (daed:spice-num (hash-ref c "lambda" 0.0))
+                         ")\n")
+          "")))))
+
+(define (daed:spice-gmin comps)
+  (let ((g 1e-12))
+    (let loop ((cs comps))
+      (if (null? cs)
+        g
+        (let ((c (car cs))
+              (ty ""))
+          (set! ty (daed:comp-type c))
+          (if (or (equal? ty "D") (equal? ty "Q") (equal? ty "M"))
+            (let ((gg (hash-ref c "gmin" 1e-12)))
+              (if (and (number? gg) (> gg 0.0))
+                (set! g gg)
+                0))
+            0)
+          (loop (cdr cs)))))))
+
+(define (daed:spice-prints comps)
+  (let ((maxn (daed:max-node comps))
+        (vs "print")
+        (is "")
+        (k 1))
+    (while (lambda () (<= k maxn))
+      (lambda ()
+        (set! vs (string-append vs " v(" (daed:spice-num k) ")"))
+        (set! k (+ k 1))))
+    (let loop ((cs comps))
+      (if (null? cs)
+        0
+        (begin
+          (let ((ty (daed:comp-type (car cs))))
+            (if (equal? ty "V")
+              (set! is (string-append is "print i("
+                                      (daed:spice-inst "V" "v"
+                                        (daed:comp-name (car cs)))
+                                      ")\n"))
+              0)
+            (if (equal? ty "E")
+              (set! is (string-append is "print i("
+                                      (daed:spice-inst "E" "e"
+                                        (daed:comp-name (car cs)))
+                                      ")\n"))
+              0)
+            (if (equal? ty "H")
+              (set! is (string-append is "print i("
+                                      (daed:spice-inst "H" "h"
+                                        (daed:comp-name (car cs)))
+                                      ")\n"))
+              0))
+          (loop (cdr cs)))))
+    (if (<= maxn 0)
+      is
+      (string-append vs "\n" is))))
+
+(define (daed:spice-body ckt)
+  (let ((comps (daed:ckt-comps ckt))
+        (dev "")
+        (mod "")
+        (gmin 1e-12))
+    (set! gmin (daed:spice-gmin comps))
+    (let loop ((cs comps))
+      (if (null? cs)
+        0
+        (begin
+          (set! dev (string-append dev (daed:spice-device (car cs))))
+          (set! mod (string-append mod (daed:spice-model (car cs))))
+          (loop (cdr cs)))))
+    (string-append
+      "* Daedalus spice export: " (daed:ckt-name ckt) "\n"
+      "* subset: " daed:spice-subset "\n"
+      "* daed-temp=" (daed:spice-num daed:temp)
+      " daed-tnom=" (daed:spice-num daed:tnom) "\n"
+      "* Cgs/Cgd MOSFET parasitics omitted (Daedalus .tran only)\n"
+      dev
+      mod
+      ".options tnom=" (daed:spice-num (daed:spice-tnom))
+      " temp=" (daed:spice-num (daed:spice-temp))
+      " gmin=" (daed:spice-num gmin) "\n")))
+
+(define (daed:circuit->spice ckt)
+  (let ((comps (if ckt (daed:ckt-comps ckt) '())))
+    (string-append
+      (daed:spice-body ckt)
+      ".control\n"
+      "op\n"
+      (daed:spice-prints comps)
+      ".endc\n"
+      ".end\n")))
+
+(define (daed:circuit->spice-tran ckt dt tstop)
+  (let ((comps (if ckt (daed:ckt-comps ckt) '()))
+        (dts (daed:spice-num dt))
+        (ts (daed:spice-num tstop)))
+    (string-append
+      (daed:spice-body ckt)
+      ".tran " dts " " ts "\n"
+      ".control\n"
+      "tran " dts " " ts "\n"
+      (daed:spice-prints comps)
+      ".endc\n"
+      ".end\n")))
+
+(define (daed:write-spice! path text)
+  (write-file path text))

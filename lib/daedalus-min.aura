@@ -117,6 +117,10 @@
         daed:search-ok? daed:search-reached? daed:search-n
         daed:search-best daed:search-rejected
         daed:topo-note!
+        ; spice export (issue #26 / M4)
+        daed:spice-version daed:spice-subset
+        daed:spice-tnom daed:spice-temp
+        daed:circuit->spice daed:circuit->spice-tran daed:write-spice!
         ; agent (Phase 4)
         daed:agent-version
         daed:observe-v daed:err-abs
@@ -174,6 +178,7 @@
 (require "agent" all:)
 (require "evolve" all:)
 (require "topo" all:)
+(require "spice" all:)
 (require "viz" all:)
 (require "ir" all:)
 (require "validate" all:)

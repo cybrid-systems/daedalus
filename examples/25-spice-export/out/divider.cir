@@ -1,0 +1,14 @@
+* Daedalus spice export: divider
+* subset: R C L V I D(Shockley) Q(NPN Ebers-Moll) M(NMOS Level-1) E G F H
+* daed-temp=27 daed-tnom=27
+* Cgs/Cgd MOSFET parasitics omitted (Daedalus .tran only)
+vin 1 0 DC 5
+r1 1 2 1000
+r2 2 0 2000
+.options tnom=28.555 temp=28.555 gmin=1e-12
+.control
+op
+print v(1) v(2)
+print i(vin)
+.endc
+.end

@@ -313,6 +313,13 @@ Topology mutation ([issue #25](https://github.com/cybrid-systems/daedalus/issues
 ./scripts/run-aura.sh examples/24-topo-mutate/main.aura
 ```
 
+SPICE export for sign-off ([issue #26](https://github.com/cybrid-systems/daedalus/issues/26)):
+
+```bash
+./scripts/run-aura.sh examples/25-spice-export/main.aura
+./scripts/roundtrip-spice.sh   # optional host oracle
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

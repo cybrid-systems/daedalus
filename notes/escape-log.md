@@ -126,6 +126,12 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #26 (SPICE export)
+
+No leave from \(V_A\) on the probe path. Deck build is pure string concat.
+Live `ngspice -b` (`scripts/roundtrip-spice.sh`) is an optional host oracle,
+same class as `compare-ngspice.sh`.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

@@ -1,0 +1,181 @@
+; examples/25-spice-export/main.aura
+;
+; Milestone 4 / issue #26 — export FlatAST → SPICE for sign-off.
+;   A. Divider deck is deterministic (title, R/V, .control op, .end)
+;   B. Agent-tuned R2=1k appears in the deck; v2=2.5
+;   C. Diode / BJT / MOSFET models carry IS N BF VTO KP LEVEL=1
+;   D. VCVS E line; write-spice! for ngspice round-trip
+;
+; Axes: circuit→spice string + models + write-file
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/25-spice-export/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 25-spice-export: SPICE sign-off export ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " spice=")
+(display daed:spice-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:spice-version)
+                                     (>= daed:spice-version 1)
+                                     (string? daed:spice-subset))))
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+; ── A. Deterministic divider ──
+(define sp (daed:circuit->spice ckt))
+(define sp2 (daed:circuit->spice ckt))
+(define a-det (daed:check-true (equal? sp sp2)))
+(define a-title (daed:check-true (daed:string-has? sp "Daedalus spice export")))
+(define a-vin (daed:check-true (daed:string-has? sp "vin")))
+(define a-r1 (daed:check-true (daed:string-has? sp "r1")))
+(define a-r2 (daed:check-true (daed:string-has? sp "r2")))
+(define a-dc (daed:check-true (daed:string-has? sp "DC")))
+(define a-op (daed:check-true (daed:string-has? sp "op")))
+(define a-end (daed:check-true (daed:string-has? sp ".end")))
+(define a-opt (daed:check-true (daed:string-has? sp ".options")))
+(define a-t (daed:check-approx (daed:spice-temp) 28.555 1e-6))
+
+(display "A divider len=")
+(display (string-length sp))
+(display " Tspice=")
+(display (daed:spice-temp))
+(newline)
+
+; ── B. Agent-tuned R2 ──
+(define mut (daed:mutate! ckt "r2" 1e3))
+(define b-mut (daed:check-true (daed:mutate-ok? mut)))
+(define op-t (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define b-v (daed:check-approx (daed:v op-t 2) 2.5 1e-6))
+(define spt (daed:circuit->spice ckt))
+(define b-has (daed:check-true
+                (or (daed:string-has? spt "1000")
+                    (daed:string-has? spt "1e3")
+                    (daed:string-has? spt "1e+3"))))
+(define b-old (daed:check-true (not (daed:string-has? spt "2000"))))
+
+(display "B tuned v2=")
+(display (daed:v op-t 2))
+(newline)
+
+; ── C. Nonlinear models ──
+(define ckt-d
+  (daed:circuit "diode-series"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:D "d1" 2 0))))
+(define spd (daed:circuit->spice ckt-d))
+(define c-dmod (daed:check-true (daed:string-has? spd ".model")))
+(define c-dis (daed:check-true (daed:string-has? spd "IS=")))
+(define c-dn (daed:check-true (daed:string-has? spd "N=")))
+
+(define ckt-q
+  (daed:circuit "bjt-ce"
+    (list (daed:V "vcc" 1 0 5.0)
+          (daed:R "rc" 1 2 1e3)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 20e3)
+          (daed:Q "q1" 2 3 0))))
+(define spq (daed:circuit->spice ckt-q))
+(define c-q (daed:check-true (and (daed:string-has? spq "NPN")
+                                  (daed:string-has? spq "BF=")
+                                  (daed:string-has? spq "q1"))))
+
+(define ckt-m
+  (daed:circuit "nmos"
+    (list (daed:V "vdd" 1 0 5.0)
+          (daed:R "rd" 1 2 1e3)
+          (daed:V "vin" 3 0 0.0)
+          (daed:M "m1" 2 3 0))))
+(define spm (daed:circuit->spice ckt-m))
+(define c-m (daed:check-true (and (daed:string-has? spm "NMOS")
+                                  (daed:string-has? spm "LEVEL=1")
+                                  (daed:string-has? spm "VTO=")
+                                  (daed:string-has? spm "KP="))))
+
+(display "C diode/bjt/mos models ok")
+(newline)
+
+; ── D. VCVS + write ──
+(define ckt-e
+  (daed:circuit "vcvs"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 0 1e3)
+          (daed:E "amp" 2 0 1 0 2.0)
+          (daed:R "rl" 2 0 1e3))))
+(define spe (daed:circuit->spice ckt-e))
+(define d-e (daed:check-true (daed:string-has? spe "amp")))
+(define d-mu (daed:check-true (or (daed:string-has? spe " 2")
+                                  (daed:string-has? spe "2.0"))))
+
+(define w1 (daed:write-spice! "examples/25-spice-export/out/divider.cir" sp))
+(define w2 (daed:write-spice! "examples/25-spice-export/out/tuned.cir" spt))
+(define w3 (daed:write-spice! "examples/25-spice-export/out/diode-series.cir" spd))
+(define w4 (daed:write-spice! "examples/25-spice-export/out/bjt-ce.cir" spq))
+(define d-w (daed:check-true (and w1 w2 w3 w4)))
+
+(define trc
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 1e-6))))
+(define sptn (daed:circuit->spice-tran trc 1e-5 0.005))
+(define d-tr (daed:check-true (daed:string-has? sptn ".tran")))
+
+(display "D wrote 4 decks + .tran")
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok
+       a-det a-title a-vin a-r1 a-r2 a-dc a-op a-end a-opt a-t
+       b-mut b-v b-has b-old
+       c-dmod c-dis c-dn c-q c-m
+       d-e d-mu d-w d-tr
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: SPICE export (escapes=0)")
+    (newline)
+    (display "RESULT pass example=25-spice-export escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: spice-export denseness probe")
+    (newline)
+    (display "RESULT fail example=25-spice-export")
+    (newline)
+    (display "  a-det=")
+    (display a-det)
+    (display " b-v=")
+    (display b-v)
+    (display " b-has=")
+    (display b-has)
+    (display " c-q=")
+    (display c-q)
+    (display " c-m=")
+    (display c-m)
+    (display " d-w=")
+    (display d-w)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))
