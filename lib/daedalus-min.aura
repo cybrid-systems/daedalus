@@ -66,9 +66,12 @@
         daed:mutate-version
         daed:find-comp daed:clone-comp daed:clone-circuit
         daed:topology-ok? daed:value-ok? daed:param-ok?
-        daed:mutate-value! daed:mutate-param! daed:mutate!
+        daed:mutate-value! daed:mutate-param! daed:mutate-nodes!
+        daed:mutate! daed:mutate-nodes-logged!
         daed:restore-circuit! daed:circuit-snapshot daed:comp-snapshot-value
-        daed:snapshot daed:restore!
+        daed:snapshot daed:snapshot-sim daed:restore!
+        daed:snap-ok? daed:snap-v daed:snap-i
+        daed:mutlog daed:mutlog-reset! daed:mutlog-last
         daed:mutate-ok? daed:mutate-reason daed:mutate-old daed:mutate-new
         ; agent (Phase 4)
         daed:agent-version
@@ -217,17 +220,69 @@
       (daed:stats-set! "agent_refuses" (hash-ref sh "agent_refuses" 0))
       #t)))
 
-; ── Dual snapshot: circuit (semantic) + denseness metrics ──
+; ── Mutation log (queryable trail: kind → ok/reason) ──
+(define *daed-mutlog* '())
+
+(define (daed:mutlog-reset!)
+  (set! *daed-mutlog* '())
+  *daed-mutlog*)
+
+(define (daed:mutlog)
+  *daed-mutlog*)
+
+(define (daed:mutlog-last)
+  (if (null? *daed-mutlog*)
+    #f
+    (car *daed-mutlog*)))
+
+(define (daed:mutlog-add! kind name ok reason)
+  (let ((h (hash)))
+    (hash-set! h "kind" kind)
+    (hash-set! h "name" name)
+    (hash-set! h "ok" ok)
+    (hash-set! h "reason" reason)
+    (set! *daed-mutlog* (cons h *daed-mutlog*))
+    h))
+
+; Lightweight solver-state clone: node volts + branch currents.
+(define (daed:clone-op-lite res)
+  (if (not res)
+    #f
+    (let ((h (hash))
+          (volts (hash))
+          (ibr (hash))
+          (src-v (daed:op-voltages res))
+          (src-i (daed:op-ibranch res))
+          (k 0))
+      (hash-set! h "ok" (hash-ref res "ok" #f))
+      (hash-set! volts "0" 0.0)
+      (set! k 1)
+      (while (lambda () (< k 32))
+        (lambda ()
+          (let ((key (number->string k)))
+            (let ((vv (hash-ref src-v key #f)))
+              (if (number? vv)
+                (hash-set! volts key vv)
+                0)))
+          (set! k (+ k 1))))
+      (hash-set! h "volts" volts)
+      (hash-set! h "ibranch" src-i)
+      h)))
+
+; ── Dual snapshot: circuit + denseness metrics (+ optional .op state) ──
 ; Optional host ast:snapshot id stored when available (>= 0).
 
 (define (daed:snapshot ckt tag)
+  (daed:snapshot-sim ckt tag #f))
+
+(define (daed:snapshot-sim ckt tag sim)
   (let ((h (hash))
         (tg (if (string? tag) tag "daed"))
         (ast-id -1))
     (hash-set! h "tag" tg)
     (hash-set! h "circuit" (daed:circuit-snapshot ckt))
     (hash-set! h "stats" (daed:clone-stats))
-    ; Best-effort host workspace snapshot (often -1 in offline denseness runs).
+    (hash-set! h "sim" (daed:clone-op-lite sim))
     (set! ast-id
       (try
         (let ((id (ast:snapshot tg)))
@@ -235,6 +290,22 @@
         (catch (e) -1)))
     (hash-set! h "ast_id" ast-id)
     h))
+
+(define (daed:snap-ok? snap)
+  (let ((sim (hash-ref snap "sim" #f)))
+    (if sim (hash-ref sim "ok" #f) #f)))
+
+(define (daed:snap-v snap node)
+  (let ((sim (hash-ref snap "sim" #f)))
+    (if (not sim)
+      0.0
+      (hash-ref (hash-ref sim "volts" (hash)) (number->string node) 0.0))))
+
+(define (daed:snap-i snap name)
+  (let ((sim (hash-ref snap "sim" #f)))
+    (if (not sim)
+      0.0
+      (hash-ref (hash-ref sim "ibranch" (hash)) name 0.0))))
 
 ; Restore circuit + metrics; then count a successful rollback.
 (define (daed:restore! ckt snap)
@@ -244,11 +315,25 @@
       (daed:restore-circuit! ckt (hash-ref snap "circuit" #f))
       (daed:restore-stats! (hash-ref snap "stats" #f))
       (daed:stats-bump! "rollbacks")
+      (daed:mutlog-add! "restore" (hash-ref snap "tag" "") #t "restored")
       #t)))
 
 ; Metered mutate: bumps "mutations" on success.
 (define (daed:mutate! ckt name new-value)
   (let ((r (daed:mutate-value! ckt name new-value)))
+    (daed:mutlog-add! "value" name
+                      (hash-ref r "ok" #f)
+                      (hash-ref r "reason" ""))
+    (if (hash-ref r "ok" #f)
+      (daed:stats-bump! "mutations")
+      0)
+    r))
+
+(define (daed:mutate-nodes-logged! ckt name n1 n2)
+  (let ((r (daed:mutate-nodes! ckt name n1 n2)))
+    (daed:mutlog-add! "nodes" name
+                      (hash-ref r "ok" #f)
+                      (hash-ref r "reason" ""))
     (if (hash-ref r "ok" #f)
       (daed:stats-bump! "mutations")
       0)

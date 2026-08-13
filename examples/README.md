@@ -27,6 +27,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 11 | [controlled-sources](11-controlled-sources/) | E/G/F/H stamp + query | **PASS** (issue #12 / M0) |
 | 12 | [linear-op-suite](12-linear-op-suite/) | `.op` vs hand calc + snapshot | **PASS** (issue #13 / M0) |
 | 13 | [tran-suite](13-tran-suite/) | RC / RL / RLC `.tran` | **PASS** (issue #14 / M0) |
+| 14 | [mutate-rollback](14-mutate-rollback/) | mutate + snapshot/rollback | **PASS** (issue #15 / M0) |
 
 ## Phase map
 
@@ -40,4 +41,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **viz** | 06 | Bidirectional netlist ↔ HTML (issue #1) |
 | **5** | 07–09 | Shockley diode, Ebers-Moll NPN, Newton-Raphson (issue #2) |
 | **viz-in** | 10 | Image/IR → validate → repair → simulate (issue #6) |
-| **M0** | 11–13 | Controlled sources, `.op` suite, `.tran` suite (issues #12–#14) |
+| **M0** | 11–14 | Netlist, `.op`, `.tran`, mutate/rollback (issues #12–#15) |

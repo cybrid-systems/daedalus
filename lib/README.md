@@ -11,7 +11,7 @@
 | `solve.aura` | 1 / 5 / M0 | Dense GE + linear `.op` + NR + branch currents |
 | `tran.aura` | 2 / 5 / M0 | Fixed-step BE `.tran`; inductor current series; NR per step |
 | `probe.aura` | 1–2 | Node voltage / series query |
-| `mutate-circuit.aura` | 3–5 | Safe parameter mutate + circuit snapshot (incl. D/Q params) |
+| `mutate-circuit.aura` | 3–5 / M0 | Value + topology mutate; circuit snapshot (incl. D/Q / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
 | `ir.aura` | issue #6 | `daedalus-ir/1` + unit parse + `IR → circuit` |

@@ -59,6 +59,8 @@ required=(
   "examples/12-linear-op-suite/README.md"
   "examples/13-tran-suite/main.aura"
   "examples/13-tran-suite/README.md"
+  "examples/14-mutate-rollback/main.aura"
+  "examples/14-mutate-rollback/README.md"
   "scripts/extract-ir.py"
   "scripts/from-image.sh"
   "scripts/run-aura.sh"

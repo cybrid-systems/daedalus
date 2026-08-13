@@ -18,6 +18,7 @@ PROBES=(
   11-controlled-sources
   12-linear-op-suite
   13-tran-suite
+  14-mutate-rollback
 )
 
 pass=0

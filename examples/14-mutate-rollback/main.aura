@@ -1,0 +1,152 @@
+; examples/14-mutate-rollback/main.aura
+;
+; Milestone 0 / issue #15 — agent mutation + snapshot/rollback.
+;   snapshot captures circuit + denseness metrics + last .op
+;   value mutate → re-sim → restore → identical .op
+;   topology mutate (reconnect) → restore
+;   mutation log is queryable
+;
+; Axes: mutate:* + dual snapshot + solver-state + agent step
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/14-mutate-rollback/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+(daed:mutlog-reset!)
+
+(display "=== Daedalus 14-mutate-rollback: mutate + snapshot/rollback ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " mutate=")
+(display daed:mutate-version)
+(newline)
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "divider"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+; ── Baseline .op ──
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v2-0 (daed:v op0 2))
+(define i0 (daed:i op0 "vin"))
+(define want0 (/ (* Vin 2e3) 3e3))
+(define base-ok (daed:check-rel v2-0 want0 1e-6 1e-9))
+
+(display "baseline v2=")
+(display v2-0)
+(display " i(vin)=")
+(display i0)
+(newline)
+
+; ── Snapshot includes solver state ──
+(define snap (daed:snapshot-sim ckt "pre" op0))
+(define snap-v (daed:check-rel (daed:snap-v snap 2) v2-0 1e-9 1e-12))
+(define snap-i (daed:check-rel (daed:snap-i snap "vin") i0 1e-9 1e-15))
+
+; ── Agent: change R2, re-sim, then roll back ──
+(define step (daed:agent-step! ckt 2 2.5 0.05 "r2" 1e3))
+(define step-ok (daed:check-true (equal? (daed:step-decision step) "commit")))
+(define v2-1 (daed:observe-v ckt 2))
+(daed:stats-bump! "sim_runs")
+(define mut-v (daed:check-approx v2-1 2.5 1e-3))
+(define r2-new (daed:comp-value (daed:find-comp ckt "r2")))
+(define r2-changed (daed:check-approx r2-new 1e3 1e-9))
+
+(display "agent commit v2=")
+(display v2-1)
+(display " r2=")
+(display r2-new)
+(display " decision=")
+(display (daed:step-decision step))
+(newline)
+
+(define rst (daed:restore! ckt snap))
+(define rst-ok (daed:check-true rst))
+(define r2-back (daed:check-approx (daed:comp-value (daed:find-comp ckt "r2")) 2e3 1e-9))
+(define op-r (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define rst-v (daed:check-rel (daed:v op-r 2) v2-0 1e-6 1e-9))
+(define rst-i (daed:check-rel (daed:i op-r "vin") i0 1e-5 1e-15))
+; Cached pre-mutation .op still readable without re-sim
+(define cached (daed:check-rel (daed:snap-v snap 2) want0 1e-6 1e-9))
+
+(display "rollback r2=")
+(display (daed:comp-value (daed:find-comp ckt "r2")))
+(display " v2=")
+(display (daed:v op-r 2))
+(newline)
+
+; ── Topology edit: disconnect R2 from GND (n2-n2). v2 → Vin. Then restore. ──
+(define snap2 (daed:snapshot-sim ckt "pre-topo" op-r))
+(define top (daed:mutate-nodes-logged! ckt "r2" 2 2))
+(define top-ok (daed:check-true (daed:mutate-ok? top)))
+(define op-t (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define top-v (daed:check-approx (daed:v op-t 2) Vin 1e-3))
+(define rst2 (daed:restore! ckt snap2))
+(define op-t2 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define top-back (daed:check-rel (daed:v op-t2 2) v2-0 1e-6 1e-9))
+(define n1-back (daed:check-eq (daed:comp-n1 (daed:find-comp ckt "r2")) 2))
+(define n2-back (daed:check-eq (daed:comp-n2 (daed:find-comp ckt "r2")) 0))
+
+(display "topo n2-n2 v2=")
+(display (daed:v op-t 2))
+(display " restored v2=")
+(display (daed:v op-t2 2))
+(newline)
+
+; ── Log ──
+(define logn (length (daed:mutlog)))
+(define log-ok (daed:check-true (>= logn 3)))
+(define last (daed:mutlog-last))
+(define last-ok (daed:check-true (and last (equal? (hash-ref last "kind" "") "restore"))))
+
+(display "mutlog n=")
+(display logn)
+(display " last=")
+(display (if last (hash-ref last "kind" "") ""))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(define all-ok
+  (and base-ok snap-v snap-i
+       step-ok mut-v r2-changed
+       rst-ok r2-back rst-v rst-i cached
+       top-ok top-v rst2 top-back n1-back n2-back
+       log-ok last-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(if all-ok
+  (begin
+    (display "PASS: mutate + snapshot/rollback + log (escapes=0)")
+    (newline)
+    (display "RESULT pass example=14-mutate-rollback escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: mutate/rollback denseness probe")
+    (newline)
+    (display "RESULT fail example=14-mutate-rollback")
+    (newline)
+    (display "  rst-v=")
+    (display rst-v)
+    (display " top-v=")
+    (display top-v)
+    (display " log-ok=")
+    (display log-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

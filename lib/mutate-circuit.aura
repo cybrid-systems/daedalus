@@ -17,13 +17,14 @@
         daed:param-ok?
         daed:mutate-value!
         daed:mutate-param!
+        daed:mutate-nodes!
         daed:restore-circuit!
         daed:circuit-snapshot
         daed:comp-snapshot-value)
 
 (require "netlist" all:)
 
-(define daed:mutate-version 2)
+(define daed:mutate-version 3)
 
 ; ── Lookup ──
 
@@ -240,6 +241,43 @@
                   (hash-set! c k new-value)
                   (hash-set! res "ok" #t)
                   (hash-set! res "reason" "applied")
+                  res)))))))))
+
+; Change n1/n2 of a two-terminal device. Rolls back locally if topology breaks.
+(define (daed:mutate-nodes! ckt name n1 n2)
+  (let ((res (hash)))
+    (hash-set! res "name" name)
+    (hash-set! res "n1" n1)
+    (hash-set! res "n2" n2)
+    (hash-set! res "ok" #f)
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((c (daed:find-comp ckt name)))
+        (if (not c)
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (if (or (not (daed:node-ok? n1)) (not (daed:node-ok? n2)))
+            (begin
+              (hash-set! res "reason" "bad-node")
+              res)
+            (let ((o1 (daed:comp-n1 c))
+                  (o2 (daed:comp-n2 c)))
+              (hash-set! res "old-n1" o1)
+              (hash-set! res "old-n2" o2)
+              (daed:comp-set-n1! c n1)
+              (daed:comp-set-n2! c n2)
+              (if (daed:topology-ok? ckt)
+                (begin
+                  (hash-set! res "ok" #t)
+                  (hash-set! res "reason" "applied")
+                  res)
+                (begin
+                  (daed:comp-set-n1! c o1)
+                  (daed:comp-set-n2! c o2)
+                  (hash-set! res "reason" "topology-after")
                   res)))))))))
 
 ; Copy snap fields onto live circuit components (same ckt object identity).

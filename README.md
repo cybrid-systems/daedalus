@@ -246,6 +246,12 @@ Fixed-step `.tran` suite ([issue #14](https://github.com/cybrid-systems/daedalus
 ./scripts/run-aura.sh examples/13-tran-suite/main.aura
 ```
 
+Agent mutate + snapshot/rollback ([issue #15](https://github.com/cybrid-systems/daedalus/issues/15)):
+
+```bash
+./scripts/run-aura.sh examples/14-mutate-rollback/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

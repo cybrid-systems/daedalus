@@ -67,6 +67,11 @@ vector; comparison is hand calculation (optional ngspice decks are documentation
 No leave from \(V_A\). BE companions for C/L, inductor current series, and
 mutate + re-`.tran` stay on the existing pure-Aura path.
 
+## Issue #15 (mutate + snapshot/rollback)
+
+No leave from \(V_A\). Value/topology mutate, solver-state snapshot, mutation
+log, and dual rollback remain pure Aura. Host `ast:snapshot` is still best-effort.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).
