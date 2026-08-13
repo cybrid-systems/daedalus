@@ -40,6 +40,7 @@ PROBES=(
   26-native-hotswap
   27-ffi-bind
   28-heph-wrap
+  29-buf-exchange
 )
 
 pass=0

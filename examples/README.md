@@ -42,6 +42,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 26 | [native-hotswap](26-native-hotswap/) | C++ GE hot-swap + fallback | **PASS** (issue #28 / M5) |
 | 27 | [ffi-bind](27-ffi-bind/) | `c-load` / `c-func` binding layer | **PASS** (issue #30 / M5) |
 | 28 | [heph-wrap](28-heph-wrap/) | Hephaestus rebind-safe + escape meter | **PASS** (issue #31 / M5) |
+| 29 | [buf-exchange](29-buf-exchange/) | Opaque copy-in/out + soak | **PASS** (issue #32 / M5) |
 
 ABI/build conventions (issue #29): `./scripts/check-native-abi.sh` — `nm`/`dlsym` + workspace variant, no Aura required.
 

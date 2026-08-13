@@ -158,16 +158,16 @@ Daedalus is better at teaching students how to **understand and reshape circuits
 **M0–M4** ([issue #27](https://github.com/cybrid-systems/daedalus/issues/27), [notes/roadmap.md](notes/roadmap.md))  
 P0 core, educational nonlinear, adaptive `.tran`, MOSFET, `.measure`, convergence aids, Monte Carlo, agent evolve, topology mutate, SPICE export. **Done.**
 
-**M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28)–[#31](https://github.com/cybrid-systems/daedalus/issues/31))  
+**M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28)–[#32](https://github.com/cybrid-systems/daedalus/issues/32))  
 Optional metered C++ dense-solve hot-swap (probe 26). FFI binding (probe 27).
-Hephaestus-pattern `rebind-safe` / `with-escape` (probe 28). Default backend remains pure.
+Hephaestus-pattern `rebind-safe` (probe 28). Opaque copy-in/out (probe 29).
+Default backend remains pure.
 
 ```bash
 ./scripts/build-native.sh
 ./scripts/check-native-abi.sh
 ./scripts/run-aura.sh examples/26-native-hotswap/main.aura
-./scripts/run-aura.sh examples/27-ffi-bind/main.aura
-./scripts/run-aura.sh examples/28-heph-wrap/main.aura
+./scripts/run-aura.sh examples/29-buf-exchange/main.aura
 ```
 
 **Non-goals (P0 / P1)**  

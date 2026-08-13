@@ -1,0 +1,108 @@
+; lib/buf.aura — Opaque buffer exchange (issue #32 / M5)
+;
+; (require "buf" all:)
+;
+; Aura owns FlatAST / solver vectors. Native scratch is c-alloc'd for
+; the call only, copy-in / copy-out, then c-free. C++ must not retain
+; the pointer. Every alloc is paired with a free; live/bytes counters
+; detect leaks under soak.
+
+(export daed:buf-version
+        daed:buf-alloc
+        daed:buf-free!
+        daed:buf-live
+        daed:buf-bytes
+        daed:buf-allocs
+        daed:buf-frees
+        daed:buf-balanced?
+        daed:f64-off
+        daed:pack-f64!
+        daed:unpack-f64!
+        daed:buf-copy-in!
+        daed:buf-copy-out!)
+
+(define daed:buf-version 1)
+
+(define *daed-buf-live* 0)
+(define *daed-buf-bytes* 0)
+(define *daed-buf-allocs* 0)
+(define *daed-buf-frees* 0)
+
+(define (daed:buf-live)
+  *daed-buf-live*)
+
+(define (daed:buf-bytes)
+  *daed-buf-bytes*)
+
+(define (daed:buf-allocs)
+  *daed-buf-allocs*)
+
+(define (daed:buf-frees)
+  *daed-buf-frees*)
+
+(define (daed:buf-balanced?)
+  (and (= *daed-buf-live* 0)
+       (= *daed-buf-allocs* *daed-buf-frees*)))
+
+(define (daed:buf-ok-ptr? p)
+  (if (not p)
+    #f
+    (if (number? p)
+      #f
+      #t)))
+
+(define (daed:buf-alloc nbytes)
+  (if (or (not (number? nbytes)) (<= nbytes 0))
+    #f
+    (let ((nb (inexact->exact nbytes))
+          (p #f))
+      (set! p (try (c-alloc nb) (catch (e) #f)))
+      (if (not (daed:buf-ok-ptr? p))
+        #f
+        (begin
+          (set! *daed-buf-allocs* (+ 1 *daed-buf-allocs*))
+          (set! *daed-buf-live* (+ 1 *daed-buf-live*))
+          (set! *daed-buf-bytes* (+ *daed-buf-bytes* nb))
+          p)))))
+
+(define (daed:buf-free! p nbytes)
+  (if (not (daed:buf-ok-ptr? p))
+    #f
+    (begin
+      (try (c-free p) (catch (e) #f))
+      (set! *daed-buf-frees* (+ 1 *daed-buf-frees*))
+      (if (> *daed-buf-live* 0)
+        (set! *daed-buf-live* (- *daed-buf-live* 1))
+        #t)
+      (if (and (number? nbytes) (> nbytes 0))
+        (set! *daed-buf-bytes* (- *daed-buf-bytes* (inexact->exact nbytes)))
+        #t)
+      (if (< *daed-buf-bytes* 0)
+        (set! *daed-buf-bytes* 0)
+        #t)
+      #t)))
+
+(define (daed:f64-off i)
+  (inexact->exact (* i 8)))
+
+(define (daed:pack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (c-struct-set! buf (daed:f64-off i) (vector-ref vec i))
+        (set! i (+ i 1))))
+    buf))
+
+(define (daed:unpack-f64! buf vec n)
+  (let ((i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (vector-set! vec i (c-struct-ref buf (daed:f64-off i) 1))
+        (set! i (+ i 1))))
+    vec))
+
+(define (daed:buf-copy-in! buf vec n)
+  (daed:pack-f64! buf vec n))
+
+(define (daed:buf-copy-out! buf vec n)
+  (daed:unpack-f64! buf vec n))

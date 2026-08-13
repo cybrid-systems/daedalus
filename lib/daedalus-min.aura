@@ -58,7 +58,9 @@
         daed:dense-solve-native! daed:native-set-fail! daed:native-calls
         daed:ffi-version daed:load-kernels daed:bind-solve-dense
         daed:bind-c-func daed:ffi-ok? daed:ffi-reason daed:ffi-error
-        daed:ffi-lib daed:ffi-fn daed:ffi-solve-dense!
+        daed:ffi-lib daed:ffi-fn daed:ffi-solve-dense! daed:buf-identity!
+        daed:buf-version daed:buf-alloc daed:buf-free! daed:buf-live
+        daed:buf-bytes daed:buf-allocs daed:buf-frees daed:buf-balanced?
         daed:simulate-op daed:simulate-op-from daed:simulate-op-gmin
         daed:simulate-op-gmin-step daed:simulate-op-source
         daed:simulate-op-ptran daed:simulate-op-aid
@@ -177,6 +179,7 @@
 (require "netlist" all:)
 (require "stamp" all:)
 (require "devices" all:)
+(require "buf" all:)
 (require "ffi" all:)
 (require "native" all:)
 (require "solve" all:)

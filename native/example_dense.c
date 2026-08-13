@@ -37,9 +37,11 @@ int main(int argc, char** argv) {
         (int64_t (*)(double*, double*, int64_t, double*))dlsym(h, "daed_solve_dense_ws");
     int64_t (*disp)(int64_t, int64_t, int64_t, int64_t) =
         (int64_t (*)(int64_t, int64_t, int64_t, int64_t))dlsym(h, "daed_dispatch");
+    int64_t (*cpy)(double*, const double*, int64_t) =
+        (int64_t (*)(double*, const double*, int64_t))dlsym(h, "daed_copy_f64");
 
     int ok = 1;
-    if (!ver || !solve || !workn || !ws || !disp) {
+    if (!ver || !solve || !workn || !ws || !disp || !cpy) {
         fprintf(stderr, "dlsym missing (unmangled names required)\n");
         ok = 0;
     } else {
@@ -80,6 +82,15 @@ int main(int argc, char** argv) {
         }
         if (ws(A2, b2, 2, NULL) != 5) {
             fprintf(stderr, "ws null work expected DAED_ERR_WORK=5\n");
+            ok = 0;
+        }
+
+        double in[] = {1.5, -2.25, 3.125};
+        double out[] = {0.0, 0.0, 0.0};
+        rc = cpy(out, in, 3);
+        if (rc != 0 || !close_enough(out[0], 1.5) || !close_enough(out[1], -2.25)
+            || !close_enough(out[2], 3.125)) {
+            fprintf(stderr, "copy rc=%lld\n", (long long)rc);
             ok = 0;
         }
     }

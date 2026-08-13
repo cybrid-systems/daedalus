@@ -1,0 +1,171 @@
+; examples/29-buf-exchange/main.aura
+;
+; Milestone 5 / issue #32 — Opaque buffer exchange.
+;   A. load kernel; identity copy-in/out of a known vector
+;   B. soak 32 cycles; live==0 and allocs==frees
+;   C. own-check still ok; backend stays pure
+;   D. 2×2 native solve via tracked buffers also balances
+;
+; Axes: c-alloc / copy-in / identity / copy-out / c-free
+; Default backend stays pure (other probes E=0)
+;
+; Build first: ./scripts/build-native.sh
+; Run: ./scripts/run-aura.sh examples/29-buf-exchange/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 29-buf-exchange: Opaque copy-in/out ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " buf=")
+(display daed:buf-version)
+(display " ffi=")
+(display daed:ffi-version)
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:buf-version)
+                                     (>= daed:buf-version 1)
+                                     (>= daed:ffi-version 2)
+                                     (equal? (daed:solve-backend) "pure"))))
+
+(define ld (daed:load-kernels #f))
+(define ready-ok (daed:check-true (daed:ffi-ok? ld)))
+
+(define src (make-vector 4 0.0))
+(vector-set! src 0 1.5)
+(vector-set! src 1 -2.25)
+(vector-set! src 2 3.125)
+(vector-set! src 3 0.0)
+(define dst (make-vector 4 0.0))
+
+; ── A. Identity round-trip ──
+(define rt (daed:buf-identity! src dst 4))
+(define a-ok (daed:check-true (daed:ffi-ok? rt)))
+(define a0 (daed:check-rel (vector-ref dst 0) 1.5 1e-12 1e-15))
+(define a1 (daed:check-rel (vector-ref dst 1) -2.25 1e-12 1e-15))
+(define a2 (daed:check-rel (vector-ref dst 2) 3.125 1e-12 1e-15))
+(define a3 (daed:check-rel (vector-ref dst 3) 0.0 1e-12 1e-15))
+(define a-bal (daed:check-true (daed:buf-balanced?)))
+
+(display "A identity ")
+(display (vector-ref dst 0))
+(display " ")
+(display (vector-ref dst 1))
+(display " ")
+(display (vector-ref dst 2))
+(display " ")
+(display (vector-ref dst 3))
+(display " live=")
+(display (daed:buf-live))
+(newline)
+
+; ── B. Soak ──
+(define soak-n 32)
+(define soak-i 0)
+(define soak-ok #t)
+(while (lambda () (< soak-i soak-n))
+  (lambda ()
+    (vector-set! dst 0 0.0)
+    (vector-set! dst 1 0.0)
+    (vector-set! dst 2 0.0)
+    (vector-set! dst 3 0.0)
+    (let ((r (daed:buf-identity! src dst 4)))
+      (if (and (daed:ffi-ok? r)
+               (< (abs (- (vector-ref dst 0) 1.5)) 1e-12)
+               (< (abs (- (vector-ref dst 1) -2.25)) 1e-12))
+        #t
+        (set! soak-ok #f)))
+    (set! soak-i (+ soak-i 1))))
+(define b-soak (daed:check-true soak-ok))
+(define b-bal (daed:check-true (daed:buf-balanced?)))
+(define b-n (daed:check-true (>= (daed:buf-allocs) (* 2 soak-n))))
+
+(display "B soak n=")
+(display soak-n)
+(display " ok=")
+(display soak-ok)
+(display " allocs=")
+(display (daed:buf-allocs))
+(display " frees=")
+(display (daed:buf-frees))
+(display " live=")
+(display (daed:buf-live))
+(newline)
+
+; ── C. own-check + backend still pure ──
+(define own (daed:own-check))
+(define c-own (daed:check-true (daed:own-ok? own)))
+(define c-be (daed:check-true (equal? (daed:solve-backend) "pure")))
+
+(display "C own=")
+(display (daed:own-ok? own))
+(display " backend=")
+(display (daed:solve-backend))
+(newline)
+
+; ── D. Tracked 2×2 solve ──
+(define A (make-vector 4 0.0))
+(vector-set! A 0 2.0)
+(vector-set! A 1 1.0)
+(vector-set! A 2 1.0)
+(vector-set! A 3 2.0)
+(define b (make-vector 2 0.0))
+(vector-set! b 0 5.0)
+(vector-set! b 1 4.0)
+(define sol (daed:ffi-solve-dense! A b 2))
+(define d-ok (daed:check-true (daed:ffi-ok? sol)))
+(define d-x (daed:check-rel (vector-ref b 0) 2.0 1e-9 1e-12))
+(define d-y (daed:check-rel (vector-ref b 1) 1.0 1e-9 1e-12))
+(define d-bal (daed:check-true (daed:buf-balanced?)))
+
+(display "D solve x=")
+(display (vector-ref b 0))
+(display " y=")
+(display (vector-ref b 1))
+(display " live=")
+(display (daed:buf-live))
+(newline)
+
+(define all-ok
+  (and ver-ok ready-ok
+       a-ok a0 a1 a2 a3 a-bal
+       b-soak b-bal b-n
+       c-own c-be
+       d-ok d-x d-y d-bal
+       (= (daed:stats-ref "correctness_fail") 0)
+       (equal? (daed:solve-backend) "pure")))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: buffer exchange identity + soak (escapes=")
+    (display (daed:escape-count))
+    (display ")")
+    (newline)
+    (display "RESULT pass example=29-buf-exchange escapes=")
+    (display (daed:escape-count))
+    (newline))
+  (begin
+    (display "FAIL: buf-exchange denseness probe")
+    (newline)
+    (display "RESULT fail example=29-buf-exchange")
+    (newline)
+    (display "  a-ok=")
+    (display a-ok)
+    (display " b-soak=")
+    (display b-soak)
+    (display " b-bal=")
+    (display b-bal)
+    (display " d-ok=")
+    (display d-ok)
+    (display " live=")
+    (display (daed:buf-live))
+    (newline)))

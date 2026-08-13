@@ -126,6 +126,12 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #32 (buffer / Opaque exchange)
+
+Same leave class as #28. `daed:buf-identity!` / `ffi-solve-dense!` copy through
+`c-alloc` scratch and free it before return. Each identity call is a metered
+escape (`buf-identity`). Default backend stays pure.
+
 ## Issue #31 (Hephaestus wrapper)
 
 Same leave as #28. `daed:with-escape` `"daed-solve-dense"` is the Hephaestus

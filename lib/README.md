@@ -17,7 +17,8 @@
 | `evolve.aura` | M4 / #24 | Spec-driven agent search + good-state log |
 | `topo.aura` | M4 / #25 | Series/parallel/tap topology mutate + family search |
 | `spice.aura` | M4 / #26 | FlatAST → SPICE deck for ngspice sign-off |
-| `ffi.aura` | M5 / #30 | `c-load` / `c-func` binding + structured failures |
+| `ffi.aura` | M5 / #30–#32 | `c-load` / `c-func` binding + structured failures |
+| `buf.aura` | M5 / #32 | Tracked Opaque alloc / copy-in / copy-out / free |
 | `native.aura` | M5 / #28–#31 | Optional C++ dense-solve + Hephaestus rebind-safe (default off) |
 | `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |

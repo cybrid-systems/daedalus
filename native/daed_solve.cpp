@@ -94,7 +94,21 @@ int64_t daed_dispatch(int64_t op, int64_t a, int64_t b, int64_t c) {
     if (op == 3) {
         return daed_solve_dense_work_n(a);
     }
+    if (op == 4) {
+        return daed_copy_f64(reinterpret_cast<double*>(a),
+                             reinterpret_cast<const double*>(b), c);
+    }
     return DAED_ERR_OP;
+}
+
+int64_t daed_copy_f64(double* dst, const double* src, int64_t n) {
+    if (dst == nullptr || src == nullptr || n <= 0) {
+        return DAED_ERR_ARG;
+    }
+    for (int64_t i = 0; i < n; ++i) {
+        dst[i] = src[i];
+    }
+    return DAED_OK;
 }
 
 int64_t daed_solve_dense(double* A, double* b, int64_t n) {

@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-14  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–28** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–28) is a metered opt-in escape.  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–29** PASS; `check-native-abi` PASS. Core \(E=0\) on the default pure backend. Native GE (probes 26–29) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -61,6 +61,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [26](../examples/26-native-hotswap/) | C++ GE hot-swap (issue #28) | **PASS** | 0 | metered |
 | [27](../examples/27-ffi-bind/) | `c-load` / `c-func` bind (issue #30) | **PASS** | 0 | metered |
 | [28](../examples/28-heph-wrap/) | Hephaestus rebind-safe (issue #31) | **PASS** | 0 | metered |
+| [29](../examples/29-buf-exchange/) | Opaque copy-in/out (issue #32) | **PASS** | 0 | metered |
 
 ### Phase 1–2 narrative
 
@@ -195,6 +196,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Logical kernel `solve-mna`; `daed:with-escape` `"daed-solve-dense"` meters each native GE.
 - Bad rebind restores the backend snapshot; poison still flips to `"pure"`.
 - Probe 28: pure E=0; native match; bad-kernel/bad-kind unchanged; restore snap → pure.
+
+### Issue #32 narrative (buffer / Opaque exchange)
+
+- `lib/buf.aura`: tracked `c-alloc` / copy-in / copy-out / `c-free`; `buf-balanced?` after soak.
+- Identity kernel `daed_copy_f64` (dispatch `op=4`). Solve path also pairs every alloc.
+- Lifetime: Aura owns vectors; C++ borrows `double*` for the call only. See [buf-exchange.md](buf-exchange.md).
+- Probe 29: known vector round-trip; 32-cycle soak `live=0`; `own-check` ok; backend stays pure.
 
 ## Judgment
 

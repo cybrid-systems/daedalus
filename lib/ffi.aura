@@ -21,9 +21,12 @@
         daed:ffi-dispatch
         daed:ffi-path
         daed:ffi-solve-dense!
-        daed:ffi-on-call!)
+        daed:ffi-on-call!
+        daed:buf-identity!)
 
-(define daed:ffi-version 1)
+(require "buf" all:)
+
+(define daed:ffi-version 2)
 
 (define *daed-ffi-max-lib* -1)
 (define *daed-ffi-last-lib* -2)
@@ -98,29 +101,13 @@
       #f
       #t)))
 
-(define (daed:f64-off i)
-  (inexact->exact (* i 8)))
-
-(define (daed:pack-f64! buf vec n)
-  (let ((i 0))
-    (while (lambda () (< i n))
-      (lambda ()
-        (c-struct-set! buf (daed:f64-off i) (vector-ref vec i))
-        (set! i (+ i 1))))
-    buf))
-
-(define (daed:unpack-f64! buf vec n)
-  (let ((i 0))
-    (while (lambda () (< i n))
-      (lambda ()
-        (vector-set! vec i (c-struct-ref buf (daed:f64-off i) 1))
-        (set! i (+ i 1))))
-    vec))
-
 ; Copy-in / dispatch op 2 / copy-out. Does not meter escapes.
+; Every c-alloc is paired with buf-free! (including partial-alloc fail).
 (define (daed:ffi-solve-dense! A b n)
   (let ((res (daed:ffi-blank "init"))
         (nn 0)
+        (asz 0)
+        (bsz 0)
         (Ab #f)
         (bb #f)
         (rc -1)
@@ -131,13 +118,18 @@
         (daed:ffi-fail "bad-arg" "n must be a positive integer" -2 "")
         (begin
           (set! nn (inexact->exact n))
-          (set! Ab (c-alloc (inexact->exact (* nn nn 8))))
-          (set! bb (c-alloc (inexact->exact (* nn 8))))
-          (if (or (not Ab) (not bb) (number? Ab) (number? bb))
-            (daed:ffi-fail "alloc" "c-alloc failed" -2 "")
+          (set! asz (inexact->exact (* nn nn 8)))
+          (set! bsz (inexact->exact (* nn 8)))
+          (set! Ab (daed:buf-alloc asz))
+          (set! bb (daed:buf-alloc bsz))
+          (if (or (not Ab) (not bb))
             (begin
-              (daed:pack-f64! Ab A (* nn nn))
-              (daed:pack-f64! bb b nn)
+              (if Ab (daed:buf-free! Ab asz) #f)
+              (if bb (daed:buf-free! bb bsz) #f)
+              (daed:ffi-fail "alloc" "c-alloc failed" -2 ""))
+            (begin
+              (daed:buf-copy-in! Ab A (* nn nn))
+              (daed:buf-copy-in! bb b nn)
               (set! rc
                 (try (disp 2
                            (c-opaque->int Ab)
@@ -147,17 +139,67 @@
               (hash-set! res "rc" rc)
               (if (= rc 0)
                 (begin
-                  (daed:unpack-f64! bb b nn)
-                  (c-free Ab)
-                  (c-free bb)
+                  (daed:buf-copy-out! bb b nn)
+                  (daed:buf-free! Ab asz)
+                  (daed:buf-free! bb bsz)
                   (hash-set! res "ok" #t)
                   (hash-set! res "reason" "ok")
                   res)
                 (begin
-                  (c-free Ab)
-                  (c-free bb)
+                  (daed:buf-free! Ab asz)
+                  (daed:buf-free! bb bsz)
                   (hash-set! res "reason" "solve-fail")
                   (hash-set! res "error" "daed_dispatch op=2 returned non-zero")
+                  res)))))))))
+
+; Identity kernel: copy-in src → C++ daed_copy_f64 → copy-out dst.
+(define (daed:buf-identity! src dst n)
+  (let ((res (daed:ffi-blank "init"))
+        (nn 0)
+        (nb 0)
+        (sb #f)
+        (db #f)
+        (rc -1)
+        (disp *daed-ffi-dispatch*))
+    (if (not (daed:ffi-proc? disp))
+      (daed:ffi-fail "no-bind" "daed_dispatch is not bound" -2 "")
+      (if (or (not (number? n)) (<= n 0))
+        (daed:ffi-fail "bad-arg" "n must be a positive integer" -2 "")
+        (begin
+          (if *daed-ffi-on-call*
+            (*daed-ffi-on-call* "buf-identity")
+            #t)
+          (set! nn (inexact->exact n))
+          (set! nb (inexact->exact (* nn 8)))
+          (set! sb (daed:buf-alloc nb))
+          (set! db (daed:buf-alloc nb))
+          (if (or (not sb) (not db))
+            (begin
+              (if sb (daed:buf-free! sb nb) #f)
+              (if db (daed:buf-free! db nb) #f)
+              (daed:ffi-fail "alloc" "c-alloc failed" -2 ""))
+            (begin
+              (daed:buf-copy-in! sb src nn)
+              (set! rc
+                (try (disp 4
+                           (c-opaque->int db)
+                           (c-opaque->int sb)
+                           nn)
+                     (catch (e) -1)))
+              (hash-set! res "rc" rc)
+              (if (= rc 0)
+                (begin
+                  (daed:buf-copy-out! db dst nn)
+                  (daed:buf-free! sb nb)
+                  (daed:buf-free! db nb)
+                  (hash-set! res "ok" #t)
+                  (hash-set! res "reason" "ok")
+                  res)
+                (begin
+                  (daed:buf-free! sb nb)
+                  (daed:buf-free! db nb)
+                  (hash-set! res "reason" "copy-fail")
+                  (hash-set! res "error" "daed_dispatch op=4 returned non-zero")
                   res)))))))))
 
 (define (daed:ffi-make-solve-fn)

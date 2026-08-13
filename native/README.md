@@ -30,6 +30,7 @@ Thin C ABI so Aura can `c-load` a dense solve and hot-swap it over
 | `daed_solve_dense_work_n` | `int64_t(int64_t n)` | workspace length in doubles (`op=3`) |
 | `daed_solve_dense_ws` | `int64_t(A, b, n, work)` | GE on a copy of `A`; `A` preserved |
 | `daed_set_fail` | `int64_t(int64_t on)` | poison next solve (`op=1`) |
+| `daed_copy_f64` | `int64_t(dst, src, n)` | identity copy (`op=4`) |
 
 | Code | Name | Meaning |
 |------|------|---------|
@@ -107,3 +108,10 @@ symbols with the C names (no `_Z…` mangling). On macOS, `nm` may prefix
 Default backend is `"pure"` (existing probes stay E=0).
 
 C example (no Aura): `native/example_dense.c`.
+
+## Buffer lifetime (issue #32)
+
+Aura owns solver vectors. Each call `c-alloc`s scratch, copies in, invokes
+C++, copies out on success, and `c-free`s always. C++ must not retain the
+pointer. Counters: `daed:buf-live` / `buf-allocs` / `buf-frees`.
+Details: [notes/buf-exchange.md](../notes/buf-exchange.md).

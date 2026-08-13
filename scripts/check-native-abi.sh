@@ -39,6 +39,7 @@ REQUIRED_SYMS=(
   daed_solve_dense_work_n
   daed_set_fail
   daed_dispatch
+  daed_copy_f64
 )
 
 nm_out="$(nm -D "$LIB" 2>/dev/null || true)"

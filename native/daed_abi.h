@@ -43,12 +43,16 @@ int64_t daed_solve_dense_ws(double* A, double* b, int64_t n, double* work);
 /* 0 = normal, non-zero = next solve returns DAED_ERR_POISON (probe). */
 int64_t daed_set_fail(int64_t on);
 
+/* Identity / exchange kernel: dst[i] = src[i] for i in [0,n). */
+int64_t daed_copy_f64(double* dst, const double* src, int64_t n);
+
 /*
  * Single Aura c-func entry (host c-func steals cid 0..N-1).
  * op 0: version
  * op 1: set_fail(a)
  * op 2: solve((double*)a, (double*)b, c)
  * op 3: work_n(a)
+ * op 4: copy_f64((double*)a dst, (double*)b src, c)
  * Workspace solve is C-only (needs a 4th pointer).
  */
 int64_t daed_dispatch(int64_t op, int64_t a, int64_t b, int64_t c);
