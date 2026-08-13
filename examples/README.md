@@ -29,6 +29,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 13 | [tran-suite](13-tran-suite/) | RC / RL / RLC `.tran` | **PASS** (issue #14 / M0) |
 | 14 | [mutate-rollback](14-mutate-rollback/) | mutate + snapshot/rollback | **PASS** (issue #15 / M0) |
 | 15 | [nr-helpers](15-nr-helpers/) | NR line-search + guess + diagnostics | **PASS** (issue #16 / M1) |
+| 16 | [nl-op-suite](16-nl-op-suite/) | nonlinear `.op` vs ngspice refs | **PASS** (issue #17 / M1) |
 
 ## Phase map
 
@@ -43,4 +44,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **5** | 07–09 | Shockley diode, Ebers-Moll NPN, Newton-Raphson (issue #2) |
 | **viz-in** | 10 | Image/IR → validate → repair → simulate (issue #6) |
 | **M0** | 11–14 | Netlist, `.op`, `.tran`, mutate/rollback (issues #12–#15) |
-| **M1** | 15 | NR line-search, initial guess, diagnostics (issue #16) |
+| **M1** | 15–16 | NR helpers + nonlinear `.op` vs ngspice (issues #16–#17) |

@@ -77,6 +77,12 @@ log, and dual rollback remain pure Aura. Host `ast:snapshot` is still best-effor
 No leave from \(V_A\). Line-search, previous-guess restart, Gmin ramp, and
 residual / fail-node diagnostics stay on the existing dense NR + GE path.
 
+## Issue #17 (nonlinear .op vs ngspice)
+
+No leave from \(V_A\) on the probe path. Frozen ngspice numbers live in
+`examples/16-nl-op-suite/ref/ngspice.tsv`. Live `ngspice -b` is an optional
+host oracle (`scripts/compare-ngspice.sh`), same class as the #13 decks.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

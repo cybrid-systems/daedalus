@@ -48,6 +48,7 @@ Primary objects under test:
 - Probe `13-tran-suite` — RC/RL/RLC BE `.tran` + mutate re-run, escapes=0 (issue #14)
 - Probe `14-mutate-rollback` — agent mutate + snapshot-sim + topology reconnect, escapes=0 (issue #15)
 - Probe `15-nr-helpers` — NR line-search + previous guess + gmin + diagnostics, escapes=0 (issue #16)
+- Probe `16-nl-op-suite` — nonlinear `.op` vs frozen ngspice refs, escapes=0 (issue #17)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 

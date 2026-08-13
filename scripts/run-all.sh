@@ -20,6 +20,7 @@ PROBES=(
   13-tran-suite
   14-mutate-rollback
   15-nr-helpers
+  16-nl-op-suite
 )
 
 pass=0
@@ -42,8 +43,22 @@ for p in "${PROBES[@]}"; do
   fi
 done
 
+echo "======== ngspice-compare ========"
+if ./scripts/compare-ngspice.sh 2>&1 | tee /tmp/daedalus-ngspice-compare.log | tail -20; then
+  if rg -q "RESULT pass|RESULT skip" /tmp/daedalus-ngspice-compare.log 2>/dev/null \
+     || grep -Eq "RESULT pass|RESULT skip" /tmp/daedalus-ngspice-compare.log; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    failed_list+=("ngspice-compare")
+  fi
+else
+  fail=$((fail + 1))
+  failed_list+=("ngspice-compare")
+fi
+
 echo "======== summary ========"
-echo "pass=$pass fail=$fail total=${#PROBES[@]}"
+echo "pass=$pass fail=$fail total=$(( ${#PROBES[@]} + 1 )) (probes=${#PROBES[@]} + ngspice-compare)"
 if [[ "$fail" -ne 0 ]]; then
   echo "failed: ${failed_list[*]}" >&2
   exit 1

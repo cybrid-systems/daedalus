@@ -82,3 +82,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Fixed-step `.tran` RC/RL/RLC + mutate re-run (issue #14, probe 13)
 - [x] Agent mutate + snapshot (circuit/metrics/.op) + topology reconnect (issue #15, probe 14)
 - [x] Nonlinear `.op` convergence helpers (line-search, guess, diagnostics; issue #16, probe 15)
+- [x] Nonlinear denseness probes + ngspice comparison (issue #17, probe 16)

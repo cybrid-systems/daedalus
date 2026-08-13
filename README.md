@@ -258,6 +258,13 @@ Nonlinear `.op` helpers — damping, previous guess, Gmin, diagnostics ([issue #
 ./scripts/run-aura.sh examples/15-nr-helpers/main.aura
 ```
 
+Nonlinear `.op` vs ngspice ([issue #17](https://github.com/cybrid-systems/daedalus/issues/17)):
+
+```bash
+./scripts/run-aura.sh examples/16-nl-op-suite/main.aura
+./scripts/compare-ngspice.sh   # optional host oracle
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

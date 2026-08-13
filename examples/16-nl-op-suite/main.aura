@@ -1,0 +1,234 @@
+; examples/16-nl-op-suite/main.aura
+;
+; Milestone 1 / issue #17 — nonlinear .op denseness vs frozen ngspice refs.
+;   A. Single diode bias (V=0.7 across D)
+;   B. Series D + R
+;   C. Half-wave rectifier DC region
+;   D. BJT CE bias (Ebers-Moll, #4 landed)
+;
+; Live ngspice is optional: ./scripts/compare-ngspice.sh
+; This probe stays in V_A and checks documented bounds (core E=0).
+;
+; Binding note: prefer top-level / let* over internal define.
+;
+; Run: ./scripts/run-aura.sh examples/16-nl-op-suite/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 16-nl-op-suite: nonlinear .op vs ngspice refs ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " devices=")
+(display daed:devices-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+; Documented bounds vs matched-T ngspice (T=TNOM=28.555 °C, Vt≈26 mV).
+(define Vtol 2e-3)
+(define Itol 5e-5)
+
+; Frozen ngspice 45.2 values (see ref/ngspice.tsv).
+(define ng-a-id 4.93209e-03)
+(define ng-b-vd 6.964593e-01)
+(define ng-b-id 4.30354e-03)
+(define ng-c-vl 4.303541e+00)
+(define ng-d-vc 2.700149e+00)
+(define ng-d-vb 7.400299e-01)
+(define ng-d-ic 2.29985e-03)
+(define ng-d-ib 2.29985e-05)
+
+(define (daed:row name daed ref bound ok)
+  (string-append "| " name
+                 " | " (daed:num->str daed)
+                 " | " (daed:num->str ref)
+                 " | " (daed:num->str (abs (- daed ref)))
+                 " | " (daed:num->str bound)
+                 " | " (if ok "PASS" "FAIL")
+                 " |\n"))
+
+; ── A. Single diode bias ──
+(define ckt-a
+  (daed:circuit "diode-bias"
+    (list (daed:V "vin" 1 0 0.7)
+          (daed:D "d1" 1 0))))
+
+(define op-a (daed:simulate-op ckt-a))
+(daed:stats-bump! "sim_runs")
+(define a-ok (daed:check-true (daed:op-ok? op-a)))
+(define a-v (daed:v op-a 1))
+(define a-i (* -1.0 (daed:i op-a "vin")))
+(define a-hand (* 1e-14 (- (exp (/ 0.7 0.026)) 1.0)))
+(define a-v-ok (daed:check-approx a-v 0.7 1e-9))
+(define a-hand-ok (daed:check-rel a-i a-hand 1e-3 1e-9))
+(define a-ng-ok (daed:check-approx a-i ng-a-id Itol))
+
+(display "A bias ok=")
+(display (daed:op-ok? op-a))
+(display " v1=")
+(display a-v)
+(display " Id=")
+(display a-i)
+(display " hand=")
+(display a-hand)
+(display " ngspice=")
+(display ng-a-id)
+(newline)
+
+; ── B. Series diode + R ──
+(define ckt-b
+  (daed:circuit "diode-series"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:D "d1" 2 0))))
+
+(define op-b (daed:simulate-op ckt-b))
+(daed:stats-bump! "sim_runs")
+(define b-ok (daed:check-true (daed:op-ok? op-b)))
+(define b-vd (daed:v op-b 2))
+(define b-id (* -1.0 (daed:i op-b "vin")))
+(define b-v-ok (daed:check-approx b-vd ng-b-vd Vtol))
+(define b-i-ok (daed:check-approx b-id ng-b-id Itol))
+(define b-band (daed:check-true (and (number? b-vd) (> b-vd 0.55) (< b-vd 0.85))))
+
+(display "B series ok=")
+(display (daed:op-ok? op-b))
+(display " vd=")
+(display b-vd)
+(display " Id=")
+(display b-id)
+(display " ng-vd=")
+(display ng-b-vd)
+(newline)
+
+; ── C. Half-wave rectifier DC ──
+(define ckt-c
+  (daed:circuit "rectifier"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:D "d1" 1 2)
+          (daed:R "rl" 2 0 1e3))))
+
+(define op-c (daed:simulate-op ckt-c))
+(daed:stats-bump! "sim_runs")
+(define c-ok (daed:check-true (daed:op-ok? op-c)))
+(define c-vl (daed:v op-c 2))
+(define c-id (* -1.0 (daed:i op-c "vin")))
+(define c-v-ok (daed:check-approx c-vl ng-c-vl Vtol))
+(define c-i-ok (daed:check-approx c-id ng-b-id Itol))
+(define c-band (daed:check-true (and (number? c-vl) (> c-vl 4.1) (< c-vl 4.5))))
+
+(display "C rectifier ok=")
+(display (daed:op-ok? op-c))
+(display " vload=")
+(display c-vl)
+(display " ng-vl=")
+(display ng-c-vl)
+(newline)
+
+; ── D. BJT CE bias ──
+(define ckt-d
+  (daed:circuit "bjt-ce"
+    (list (daed:V "vcc" 1 0 5.0)
+          (daed:R "rc" 1 2 1e3)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 2e4)
+          (daed:Q "q1" 2 3 0))))
+
+(define op-d (daed:simulate-op ckt-d))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-true (daed:op-ok? op-d)))
+(define d-vc (daed:v op-d 2))
+(define d-vb (daed:v op-d 3))
+(define d-ic (* -1.0 (daed:i op-d "vcc")))
+(define d-ib (* -1.0 (daed:i op-d "vin")))
+(define d-vc-ok (daed:check-approx d-vc ng-d-vc 5e-3))
+(define d-vb-ok (daed:check-approx d-vb ng-d-vb 5e-3))
+(define d-ic-ok (daed:check-approx d-ic ng-d-ic Itol))
+(define d-ib-ok (daed:check-approx d-ib ng-d-ib 1e-6))
+(define d-active (daed:check-true (and (number? d-vc) (> d-vc 1.0) (< d-vc 4.0)
+                                      (number? d-vb) (> d-vb 0.6) (< d-vb 0.85))))
+
+(display "D bjt ok=")
+(display (daed:op-ok? op-d))
+(display " vc=")
+(display d-vc)
+(display " vb=")
+(display d-vb)
+(display " Ic=")
+(display d-ic)
+(display " ng-vc=")
+(display ng-d-vc)
+(newline)
+
+; ── Generate nonlinear denseness report ──
+(define report
+  (string-append
+    "# Nonlinear .op denseness report\n\n"
+    "Generated by probe `16-nl-op-suite` (issue #17). "
+    "ngspice column is frozen ngspice 45.2 at T=TNOM=28.555 °C "
+    "(educational Shockley / Ebers-Moll; see `ref/ngspice.tsv`).\n\n"
+    "| case | daedalus | ngspice | |Δ| | bound | ok |\n"
+    "|------|----------|---------|-----|-------|----|\n"
+    (daed:row "A Id (V=0.7)" a-i ng-a-id Itol a-ng-ok)
+    (daed:row "B vd (series)" b-vd ng-b-vd Vtol b-v-ok)
+    (daed:row "B Id" b-id ng-b-id Itol b-i-ok)
+    (daed:row "C vload (rectifier)" c-vl ng-c-vl Vtol c-v-ok)
+    (daed:row "D vc (CE)" d-vc ng-d-vc 5e-3 d-vc-ok)
+    (daed:row "D vb (CE)" d-vb ng-d-vb 5e-3 d-vb-ok)
+    (daed:row "D Ic" d-ic ng-d-ic Itol d-ic-ok)
+    "\nBounds: voltage 2 mV (CE 5 mV); current 50 µA (Ib 1 µA). "
+    "Typical |Δ| is tens of µV / sub-µA. Default 27 °C ngspice "
+    "shifts Vd by ~3.6 mV because our Vt is frozen at 26 mV — "
+    "that is a model/temperature difference, not a solver error.\n"))
+
+(define wrote (write-file "examples/16-nl-op-suite/out/nl-op-report.md" report))
+(define wrote-ok (daed:check-true (and (number? wrote) (> wrote 0))))
+
+(display "wrote report bytes=")
+(display wrote)
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and a-ok a-v-ok a-hand-ok a-ng-ok
+       b-ok b-v-ok b-i-ok b-band
+       c-ok c-v-ok c-i-ok c-band
+       d-ok d-vc-ok d-vb-ok d-ic-ok d-ib-ok d-active
+       wrote-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: nonlinear .op vs ngspice refs (escapes=0)")
+    (newline)
+    (display "RESULT pass example=16-nl-op-suite escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: nonlinear .op comparison suite")
+    (newline)
+    (display "RESULT fail example=16-nl-op-suite")
+    (newline)
+    (display "  a-ng-ok=")
+    (display a-ng-ok)
+    (display " b-v-ok=")
+    (display b-v-ok)
+    (display " c-v-ok=")
+    (display c-v-ok)
+    (display " d-vc-ok=")
+    (display d-vc-ok)
+    (display " d-vb-ok=")
+    (display d-vb-ok)
+    (display " wrote-ok=")
+    (display wrote-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

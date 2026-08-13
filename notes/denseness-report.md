@@ -1,8 +1,8 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + vision pipeline** — probes **00–03, 05–10** PASS; core \(E=0\). Live VLM extract is an optional logged host escape.  
-**Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, and IR/repair denseness hold. Live photo accuracy remains a product loop, not a denseness blocker.
+**Status:** **Phase 5 + M0 + M1** — probes **00–03, 05–16** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
 **Prior spans:** Aether / Hephaestus / Hermes / Prometheus denseness reports (siblings)
@@ -48,6 +48,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [13](../examples/13-tran-suite/) | RC/RL/RLC `.tran` (issue #14) | **PASS** | 0 | 0 |
 | [14](../examples/14-mutate-rollback/) | mutate + snapshot/rollback (issue #15) | **PASS** | 0 | 0 |
 | [15](../examples/15-nr-helpers/) | NR helpers (issue #16) | **PASS** | 0 | 0 |
+| [16](../examples/16-nl-op-suite/) | nonlinear `.op` vs ngspice (issue #17) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -86,6 +87,15 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Initial guesses: zero (default), previous solution (`simulate-op-from`), Gmin ramp fallback (`simulate-op-gmin`).
 - Failures report residual history, iteration count, failed node, and a reason string — not silent NaN.
 - Probe 15: diode + rectifier cold-start `.op`, previous-guess fewer iters, gap-circuit diagnostics; probes 07–09 unchanged.
+
+### Issue #17 narrative (nonlinear vs ngspice)
+
+- Probe 16: diode bias, series D+R, rectifier DC, BJT CE vs frozen ngspice 45.2
+  numbers at matched \(T\) (\(V_t \approx 26\,\mathrm{mV}\)).
+- Bounds: 2 mV / 50 µA (CE 5 mV). Typical \|Δ\| is tens of µV.
+- Default 27 °C ngspice shift is a **model** difference (frozen \(V_t\)), documented
+  in [nl-op-compare.md](nl-op-compare.md). Live ngspice is optional
+  (`scripts/compare-ngspice.sh`), not on the Aura path.
 
 ## Judgment
 
