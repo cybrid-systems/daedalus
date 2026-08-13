@@ -47,6 +47,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [12](../examples/12-linear-op-suite/) | linear `.op` vs hand calc (issue #13) | **PASS** | 0 | 0 |
 | [13](../examples/13-tran-suite/) | RC/RL/RLC `.tran` (issue #14) | **PASS** | 0 | 0 |
 | [14](../examples/14-mutate-rollback/) | mutate + snapshot/rollback (issue #15) | **PASS** | 0 | 0 |
+| [15](../examples/15-nr-helpers/) | NR helpers (issue #16) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -78,6 +79,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Probe 10: 5 clean IRs simulate; ≥10 broken IRs diagnosed; ≥7/10 seeded repairs recover; fixture `from-image`; escapes=0.
 
 ---
+
+### Issue #16 narrative (NR helpers)
+
+- Line-search damps the Newton step when residual would increase (\(\lambda=1,1/2,1/4,1/8\)).
+- Initial guesses: zero (default), previous solution (`simulate-op-from`), Gmin ramp fallback (`simulate-op-gmin`).
+- Failures report residual history, iteration count, failed node, and a reason string — not silent NaN.
+- Probe 15: diode + rectifier cold-start `.op`, previous-guess fewer iters, gap-circuit diagnostics; probes 07–09 unchanged.
 
 ## Judgment
 

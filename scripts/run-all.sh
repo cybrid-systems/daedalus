@@ -19,6 +19,7 @@ PROBES=(
   12-linear-op-suite
   13-tran-suite
   14-mutate-rollback
+  15-nr-helpers
 )
 
 pass=0

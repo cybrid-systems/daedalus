@@ -1,0 +1,230 @@
+; examples/15-nr-helpers/main.aura
+;
+; Milestone 1 / issue #16 — NR line-search, initial guess, diagnostics.
+;   series diode from cold start
+;   half-wave rectifier DC .op
+;   previous-guess restart uses fewer iterations
+;   gmin path agrees with cold start
+;   open/gap circuit reports reason + hist + fail-node (no silent NaN)
+;
+; Axes: newton-solve line-search + guess strategies + residual history
+; Escapes on core path: 0
+;
+; Binding note: prefer top-level / let* over internal define
+; (host internal-define behaves like simultaneous letrec).
+;
+; Run: ./scripts/run-aura.sh examples/15-nr-helpers/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 15-nr-helpers: NR damping + guess + diagnostics ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " solve=")
+(display daed:solve-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:solve-version)
+                                     (>= daed:solve-version 5))))
+
+(define Vin 5.0)
+(define Rval 1e3)
+
+; ── A. Series diode from cold start ──
+(define ckt-d
+  (daed:circuit "diode-fwd"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:D "d1" 2 0))))
+
+(define op-d (daed:simulate-op ckt-d))
+(daed:stats-bump! "sim_runs")
+(define vd (daed:v op-d 2))
+(define id (/ (- Vin vd) Rval))
+(define iters-d (daed:op-iters op-d))
+(define resid-d (daed:op-residual op-d))
+(define hist-d (daed:op-hist op-d))
+(define fn-d (daed:op-fail-node op-d))
+(define lam-d (daed:op-lambda op-d))
+
+(define d-ok (daed:check-true (daed:op-ok? op-d)))
+(define d-v1 (daed:check-approx (daed:v op-d 1) Vin 1e-4))
+(define d-vd (daed:check-true (and (number? vd) (> vd 0.55) (< vd 0.85))))
+(define d-id (daed:check-true (and (number? id) (> id 0.003) (< id 0.005))))
+(define d-it (daed:check-true (and (number? iters-d) (> iters-d 0) (< iters-d 50))))
+(define d-rs (daed:check-true (and (number? resid-d) (= resid-d resid-d) (< resid-d 1e-6))))
+(define d-hist
+  (daed:check-true
+    (and (vector? hist-d)
+         (= (vector-length hist-d) iters-d)
+         (> (vector-length hist-d) 0)
+         (number? (vector-ref hist-d (- (vector-length hist-d) 1)))
+         (= (vector-ref hist-d (- (vector-length hist-d) 1))
+            (vector-ref hist-d (- (vector-length hist-d) 1))))))
+(define d-fn (daed:check-true (and (number? fn-d) (>= fn-d 0) (<= fn-d 2))))
+(define d-lam (daed:check-true (and (number? lam-d) (> lam-d 0.0) (<= lam-d 1.0))))
+
+(display "A diode ok=")
+(display (daed:op-ok? op-d))
+(display " vd=")
+(display vd)
+(display " iters=")
+(display iters-d)
+(display " resid=")
+(display resid-d)
+(display " fail-node=")
+(display fn-d)
+(display " lambda=")
+(display lam-d)
+(newline)
+
+; ── B. Half-wave rectifier DC .op: vin ── D ── n2 ── R → GND ──
+(define ckt-r
+  (daed:circuit "rectifier"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:D "d1" 1 2)
+          (daed:R "rl" 2 0 Rval))))
+
+(define op-r (daed:simulate-op ckt-r))
+(daed:stats-bump! "sim_runs")
+(define vr (daed:v op-r 2))
+(define r-ok (daed:check-true (daed:op-ok? op-r)))
+(define r-v1 (daed:check-approx (daed:v op-r 1) Vin 1e-4))
+(define r-vd (daed:check-true (and (number? vr) (> vr 4.1) (< vr 4.5))))
+(define r-rs (daed:check-true (and (number? (daed:op-residual op-r))
+                                  (< (daed:op-residual op-r) 1e-6))))
+
+(display "B rectifier ok=")
+(display (daed:op-ok? op-r))
+(display " vload=")
+(display vr)
+(display " iters=")
+(display (daed:op-iters op-r))
+(newline)
+
+; ── C. Previous-guess restart ──
+(define op-from (daed:simulate-op-from ckt-d op-d))
+(daed:stats-bump! "sim_runs")
+(define from-ok (daed:check-true (daed:op-ok? op-from)))
+(define from-vd (daed:check-approx (daed:v op-from 2) vd 1e-6))
+(define from-it (daed:op-iters op-from))
+(define from-fewer (daed:check-true (and (number? from-it)
+                                        (<= from-it iters-d)
+                                        (<= from-it 3))))
+
+(display "C from-guess ok=")
+(display (daed:op-ok? op-from))
+(display " vd=")
+(display (daed:v op-from 2))
+(display " iters=")
+(display from-it)
+(display " (cold=")
+(display iters-d)
+(display ")")
+(newline)
+
+; ── D. Gmin path (cold start already ok → same solution) ──
+(define op-g (daed:simulate-op-gmin ckt-d))
+(daed:stats-bump! "sim_runs")
+(define g-ok (daed:check-true (daed:op-ok? op-g)))
+(define g-vd (daed:check-approx (daed:v op-g 2) vd 1e-6))
+
+(display "D gmin ok=")
+(display (daed:op-ok? op-g))
+(display " vd=")
+(display (daed:v op-g 2))
+(newline)
+
+; ── E. Gap / open node: actionable diagnostics, not silent NaN ──
+(define ckt-bad
+  (daed:circuit "gap"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 Rval)
+          (daed:D "d1" 4 0))))
+
+(define op-bad (daed:simulate-op ckt-bad))
+(daed:stats-bump! "sim_runs")
+(define bad-resid (daed:op-residual op-bad))
+(define bad-hist (daed:op-hist op-bad))
+(define bad-fn (daed:op-fail-node op-bad))
+(define bad-reason (hash-ref op-bad "reason" ""))
+(define bad-ok (daed:check-true (not (daed:op-ok? op-bad))))
+(define bad-rs (daed:check-true (and (number? bad-resid)
+                                    (= bad-resid bad-resid))))
+(define bad-h
+  (daed:check-true
+    (and (vector? bad-hist)
+         (> (vector-length bad-hist) 0)
+         (number? (vector-ref bad-hist 0))
+         (= (vector-ref bad-hist 0) (vector-ref bad-hist 0)))))
+(define bad-fn-ok (daed:check-true (and (number? bad-fn) (>= bad-fn 0))))
+(define bad-why (daed:check-true (and (string? bad-reason)
+                                     (> (string-length bad-reason) 0)
+                                     (not (equal? bad-reason "init")))))
+
+(display "E gap ok=")
+(display (daed:op-ok? op-bad))
+(display " reason=")
+(display bad-reason)
+(display " resid=")
+(display bad-resid)
+(display " fail-node=")
+(display bad-fn)
+(display " hist-n=")
+(display (vector-length bad-hist))
+(newline)
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok
+       d-ok d-v1 d-vd d-id d-it d-rs d-hist d-fn d-lam
+       r-ok r-v1 r-vd r-rs
+       from-ok from-vd from-fewer
+       g-ok g-vd
+       bad-ok bad-rs bad-h bad-fn-ok bad-why
+       esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 4)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: NR helpers (line-search, guess, diagnostics) (escapes=0)")
+    (newline)
+    (display "RESULT pass example=15-nr-helpers escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: NR helpers denseness probe")
+    (newline)
+    (display "RESULT fail example=15-nr-helpers")
+    (newline)
+    (display "  ver-ok=")
+    (display ver-ok)
+    (display " d-ok=")
+    (display d-ok)
+    (display " d-vd=")
+    (display d-vd)
+    (display " d-hist=")
+    (display d-hist)
+    (display " r-ok=")
+    (display r-ok)
+    (display " r-vd=")
+    (display r-vd)
+    (display " from-fewer=")
+    (display from-fewer)
+    (display " g-ok=")
+    (display g-ok)
+    (display " bad-ok=")
+    (display bad-ok)
+    (display " bad-why=")
+    (display bad-why)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

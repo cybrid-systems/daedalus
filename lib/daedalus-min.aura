@@ -48,9 +48,10 @@
         daed:stamp-diode-nr! daed:stamp-bjt-nr!
         ; solve
         daed:solve-version daed:dense-solve! daed:newton-solve
-        daed:simulate-op
+        daed:simulate-op daed:simulate-op-from daed:simulate-op-gmin
         daed:op-ok? daed:op-x daed:op-n daed:op-n-v daed:op-voltages
         daed:op-iters daed:op-residual daed:op-i daed:op-ibranch
+        daed:op-hist daed:op-fail-node daed:op-lambda
         daed:nr-maxiter daed:nr-atol daed:nr-vtol daed:nr-dvmax
         ; tran
         daed:tran-version

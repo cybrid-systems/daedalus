@@ -252,6 +252,12 @@ Agent mutate + snapshot/rollback ([issue #15](https://github.com/cybrid-systems/
 ./scripts/run-aura.sh examples/14-mutate-rollback/main.aura
 ```
 
+Nonlinear `.op` helpers — damping, previous guess, Gmin, diagnostics ([issue #16](https://github.com/cybrid-systems/daedalus/issues/16)):
+
+```bash
+./scripts/run-aura.sh examples/15-nr-helpers/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

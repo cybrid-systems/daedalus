@@ -72,6 +72,11 @@ mutate + re-`.tran` stay on the existing pure-Aura path.
 No leave from \(V_A\). Value/topology mutate, solver-state snapshot, mutation
 log, and dual rollback remain pure Aura. Host `ast:snapshot` is still best-effort.
 
+## Issue #16 (NR convergence helpers)
+
+No leave from \(V_A\). Line-search, previous-guess restart, Gmin ramp, and
+residual / fail-node diagnostics stay on the existing dense NR + GE path.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).
