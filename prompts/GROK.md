@@ -56,6 +56,7 @@ Primary objects under test:
 - Probe `21-step-temp` — `.step` + temperature sweep, escapes=0 (issue #22)
 - Probe `22-monte-carlo` — Monte Carlo + yield, escapes=0 (issue #23)
 - Probe `23-agent-evolve` — spec-driven agent search, escapes=0 (issue #24)
+- Probe `24-topo-mutate` — topology add/remove/search, escapes=0 (issue #25)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 

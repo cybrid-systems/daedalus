@@ -15,6 +15,7 @@
 | `step.aura` | M3 / #22 | `.step` lin/log/list + temp sweep |
 | `mc.aura` | M3 / #23 | Monte Carlo uniform/gauss + yield |
 | `evolve.aura` | M4 / #24 | Spec-driven agent search + good-state log |
+| `topo.aura` | M4 / #25 | Series/parallel/tap topology mutate + family search |
 | `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |

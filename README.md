@@ -307,6 +307,12 @@ Spec-driven agent search ([issue #24](https://github.com/cybrid-systems/daedalus
 ./scripts/run-aura.sh examples/23-agent-evolve/main.aura
 ```
 
+Topology mutation ([issue #25](https://github.com/cybrid-systems/daedalus/issues/25)):
+
+```bash
+./scripts/run-aura.sh examples/24-topo-mutate/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

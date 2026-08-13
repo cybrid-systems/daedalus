@@ -37,6 +37,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 21 | [step-temp](21-step-temp/) | `.step` + temperature | **PASS** (issue #22 / M3) |
 | 22 | [monte-carlo](22-monte-carlo/) | Monte Carlo + yield | **PASS** (issue #23 / M3) |
 | 23 | [agent-evolve](23-agent-evolve/) | spec-driven agent search | **PASS** (issue #24 / M4) |
+| 24 | [topo-mutate](24-topo-mutate/) | topology add/remove/search | **PASS** (issue #25 / M4) |
 
 ## Phase map
 
@@ -54,4 +55,4 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | **M1** | 15–16 | NR helpers + nonlinear `.op` vs ngspice (issues #16–#17) |
 | **M2** | 17–19 | Adaptive `.tran`, MOSFET, `.measure` (issues #18–#20) |
 | **M3** | 20–22 | Convergence aids + `.step` / temperature + Monte Carlo (issues #21–#23) |
-| **M4** | 23 | Spec-driven agent parameter search (issue #24) |
+| **M4** | 23–24 | Spec-driven agent search + topology mutate (issues #24–#25) |

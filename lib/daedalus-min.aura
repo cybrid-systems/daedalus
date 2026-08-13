@@ -106,6 +106,17 @@
         daed:snap-ok? daed:snap-v daed:snap-i
         daed:mutlog daed:mutlog-reset! daed:mutlog-last
         daed:mutate-ok? daed:mutate-reason daed:mutate-old daed:mutate-new
+        ; topology mutate (issue #25 / M4)
+        daed:topo-version daed:n-comps daed:two-terminal?
+        daed:topo-add! daed:topo-remove!
+        daed:topo-series-r! daed:topo-unseries!
+        daed:topo-parallel-c! daed:topo-parallel-r!
+        daed:topo-comp-c! daed:topo-tap!
+        daed:topo-op daed:topo-apply! daed:topo-search!
+        daed:topo-ok? daed:topo-reason daed:topo-name
+        daed:search-ok? daed:search-reached? daed:search-n
+        daed:search-best daed:search-rejected
+        daed:topo-note!
         ; agent (Phase 4)
         daed:agent-version
         daed:observe-v daed:err-abs
@@ -162,6 +173,7 @@
 (require "mutate-circuit" all:)
 (require "agent" all:)
 (require "evolve" all:)
+(require "topo" all:)
 (require "viz" all:)
 (require "ir" all:)
 (require "validate" all:)
@@ -520,6 +532,16 @@
                     (set! steps lim)
                     0)
                   (loop))))))))))
+
+(define (daed:topo-note! r)
+  (daed:mutlog-add! (hash-ref r "kind" "topo")
+                    (hash-ref r "name" "")
+                    (hash-ref r "ok" #f)
+                    (hash-ref r "reason" ""))
+  (if (hash-ref r "ok" #f)
+    (daed:stats-bump! "mutations")
+    0)
+  r)
 
 ; Metered spec-driven search (issue #24).
 (define (daed:evolve! ckt spec name max-steps strategy)

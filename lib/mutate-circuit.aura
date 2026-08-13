@@ -24,7 +24,8 @@
 
 (require "netlist" all:)
 
-(define daed:mutate-version 3)
+; 4 = issue #25 restore replaces the component list (add/remove)
+(define daed:mutate-version 4)
 
 ; ── Lookup ──
 
@@ -291,28 +292,33 @@
                   (hash-set! res "reason" "topology-after")
                   res)))))))))
 
-; Copy snap fields onto live circuit components (same ckt object identity).
+; Restore name + component list. Survivors keep object identity;
+; missing names are dropped; snap-only names are cloned in.
 (define (daed:restore-circuit! ckt snap)
   (if (not snap)
     #f
     (begin
       (hash-set! ckt "name" (hash-ref snap "name" (daed:ckt-name ckt)))
-      (let ((snap-comps (hash-ref snap "comps" '())))
-        (let loop ((live (daed:ckt-comps ckt)))
-          (if (null? live)
-            #t
+      (let ((snap-comps (hash-ref snap "comps" '()))
+            (live (daed:ckt-comps ckt))
+            (acc '()))
+        (let loop ((ss snap-comps))
+          (if (null? ss)
+            (hash-set! ckt "comps" (reverse acc))
             (begin
-              (let ((c (car live)))
-                (let ((sc (daed:find-comp-in-list snap-comps (daed:comp-name c))))
-                  (if sc
+              (let ((sc (car ss)))
+                (let ((lc (daed:find-comp-in-list live (daed:comp-name sc))))
+                  (if lc
                     (begin
-                      (hash-set! c "type" (daed:comp-type sc))
-                      (hash-set! c "n1" (daed:comp-n1 sc))
-                      (hash-set! c "n2" (daed:comp-n2 sc))
-                      (hash-set! c "value" (daed:comp-value sc))
-                      (daed:copy-model-fields! c sc))
-                    0)))
-              (loop (cdr live)))))))))
+                      (hash-set! lc "type" (daed:comp-type sc))
+                      (hash-set! lc "n1" (daed:comp-n1 sc))
+                      (hash-set! lc "n2" (daed:comp-n2 sc))
+                      (hash-set! lc "value" (daed:comp-value sc))
+                      (daed:copy-model-fields! lc sc)
+                      (set! acc (cons lc acc)))
+                    (set! acc (cons (daed:clone-comp sc) acc)))))
+              (loop (cdr ss)))))
+        #t))))
 
 (define (daed:find-comp-in-list comps name)
   (let loop ((cs comps))

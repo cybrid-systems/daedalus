@@ -90,3 +90,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Parameter `.step` + temperature (issue #22, probe 21)
 - [x] Monte Carlo + yield (issue #23, probe 22)
 - [x] Spec-driven agent parameter search (issue #24, probe 23)
+- [x] Limited topology mutation surface (issue #25, probe 24)

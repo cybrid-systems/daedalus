@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0–M4** — probes **00–03, 05–23** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0–M4** — probes **00–03, 05–24** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -56,6 +56,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [21](../examples/21-step-temp/) | `.step` + temperature (issue #22) | **PASS** | 0 | 0 |
 | [22](../examples/22-monte-carlo/) | Monte Carlo + yield (issue #23) | **PASS** | 0 | 0 |
 | [23](../examples/23-agent-evolve/) | spec-driven agent search (issue #24) | **PASS** | 0 | 0 |
+| [24](../examples/24-topo-mutate/) | topology mutate + family search (issue #25) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -148,6 +149,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - `evolve!` is O→D→M→V→R: hill-climb or scale-toward-target; each commit is a good snapshot.
 - Agent: `evo-restore-good!` rewinds to any intermediate good; `evo-replay!` reproduces the log.
 - Probe 23: CE `Vc=2.5 V ± 2 %`; RC `WHEN 2.5 V ≈ τ ln 2`.
+
+### Issue #25 narrative (topology mutate)
+
+- `topo.aura`: add/remove, series-R insert/undo, parallel C/R, tap, compensation C.
+- `topology-ok?` rejects invalid graphs (dup name, `R≤0`, F/H dangling ctrl); snap+restore on fail.
+- `restore-circuit!` now replaces the component list so add/remove rolls back.
+- `topo-search!` tries a family of ops from the origin snapshot and keeps the best spec.
 
 ## Judgment
 

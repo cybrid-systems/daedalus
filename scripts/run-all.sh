@@ -28,6 +28,7 @@ PROBES=(
   21-step-temp
   22-monte-carlo
   23-agent-evolve
+  24-topo-mutate
 )
 
 pass=0

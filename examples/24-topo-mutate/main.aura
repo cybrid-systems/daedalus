@@ -1,0 +1,254 @@
+; examples/24-topo-mutate/main.aura
+;
+; Milestone 4 / issue #25 — limited topology mutation surface.
+;   A. parallel-R across R2 → v2=2.5; restore drops the extra R
+;   B. series-R on R1 → v2=2.5; unseries restores the path
+;   C. parallel-C: DC unchanged; compensation C on a CE; restore
+;   D. rejects: dup-name, R<=0, missing remove, F/H dangling ctrl
+;   E. agent topo-search! picks a passing family member
+;
+; Axes: add/remove + series/tap + topology-ok? + snap/restore
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/24-topo-mutate/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+(daed:mutlog-reset!)
+
+(display "=== Daedalus 24-topo-mutate: topology mutation surface ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " topo=")
+(display daed:topo-version)
+(display " mutate=")
+(display daed:mutate-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:topo-version)
+                                     (>= daed:topo-version 1)
+                                     (>= daed:mutate-version 4))))
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+(define n0 (daed:n-comps ckt))
+(define n0-ok (daed:check-eq n0 3))
+(define op0 (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define v0 (daed:v op0 2))
+(define v0-ok (daed:check-rel v0 (/ 10.0 3.0) 1e-6 1e-9))
+
+; ── A. Parallel R across R2 ──
+(define snap-a (daed:snapshot ckt "pre-par"))
+(define par (daed:topo-note! (daed:topo-parallel-r! ckt "r2" "r3" 2e3)))
+(define a-ok (daed:check-true (daed:topo-ok? par)))
+(define a-n (daed:check-eq (daed:n-comps ckt) 4))
+(define op-a (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define a-v (daed:check-approx (daed:v op-a 2) 2.5 1e-6))
+(define rst-a (daed:restore! ckt snap-a))
+(define a-back-n (daed:check-eq (daed:n-comps ckt) 3))
+(define a-gone (daed:check-true (not (daed:find-comp ckt "r3"))))
+(define op-ar (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define a-back-v (daed:check-rel (daed:v op-ar 2) v0 1e-6 1e-9))
+
+(display "A parallel-R v2=")
+(display (daed:v op-a 2))
+(display " restored n=")
+(display (daed:n-comps ckt))
+(newline)
+
+; ── B. Series R on R1 ──
+(define snap-b (daed:circuit-snapshot ckt))
+(define ser (daed:topo-note! (daed:topo-series-r! ckt "r1" "rs" 1e3)))
+(define b-ok (daed:check-true (daed:topo-ok? ser)))
+(define b-n (daed:check-eq (daed:n-comps ckt) 4))
+(define r1 (daed:find-comp ckt "r1"))
+(define rs (daed:find-comp ckt "rs"))
+(define b-split (daed:check-true
+                  (and r1 rs
+                       (= (daed:comp-n1 rs) 1)
+                       (= (daed:comp-n2 rs) (daed:comp-n1 r1)))))
+(define op-b (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define b-v (daed:check-approx (daed:v op-b 2) 2.5 1e-6))
+(define uns (daed:topo-note! (daed:topo-unseries! ckt "r1" "rs")))
+(define b-uns (daed:check-true (daed:topo-ok? uns)))
+(define b-back-n (daed:check-eq (daed:n-comps ckt) 3))
+(define op-bu (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define b-back-v (daed:check-rel (daed:v op-bu 2) v0 1e-6 1e-9))
+(define r1b (daed:find-comp ckt "r1"))
+(define b-r1 (daed:check-true (and r1b
+                                   (= (daed:comp-n1 r1b) 1)
+                                   (= (daed:comp-n2 r1b) 2))))
+
+(display "B series-R v2=")
+(display (daed:v op-b 2))
+(display " unseries v2=")
+(display (daed:v op-bu 2))
+(newline)
+
+; ── C. Parallel C (DC unchanged) + CE compensation C ──
+(define cap (daed:topo-note! (daed:topo-parallel-c! ckt "r2" "c1" 1e-6)))
+(define c-ok (daed:check-true (daed:topo-ok? cap)))
+(define op-c (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define c-dc (daed:check-rel (daed:v op-c 2) v0 1e-6 1e-9))
+(daed:restore-circuit! ckt snap-b)
+
+(define ckt-q
+  (daed:circuit "ce"
+    (list (daed:V "vcc" 1 0 5.0)
+          (daed:R "rc" 1 2 1e3)
+          (daed:V "vin" 4 0 1.2)
+          (daed:R "rb" 4 3 20e3)
+          (daed:Q "q1" 2 3 0))))
+(define op-q0 (daed:simulate-op ckt-q))
+(daed:stats-bump! "sim_runs")
+(define vc0 (daed:v op-q0 2))
+(define mill (daed:topo-note! (daed:topo-comp-c! ckt-q "cc" 2 3 1e-12)))
+(define c-mill (daed:check-true (daed:topo-ok? mill)))
+(define op-q1 (daed:simulate-op ckt-q))
+(daed:stats-bump! "sim_runs")
+(define c-vc (daed:check-rel (daed:v op-q1 2) vc0 1e-6 1e-9))
+(define c-has (daed:check-true (daed:find-comp ckt-q "cc")))
+(define snap-q (daed:circuit-snapshot ckt-q))
+(define rm-cc (daed:topo-note! (daed:topo-remove! ckt-q "cc")))
+(define c-rm (daed:check-true (and (daed:topo-ok? rm-cc)
+                                   (not (daed:find-comp ckt-q "cc")))))
+(daed:restore-circuit! ckt-q snap-q)
+(define c-rst (daed:check-true (daed:find-comp ckt-q "cc")))
+
+(display "C parallel-C dc=")
+(display (daed:v op-c 2))
+(display " miller vc=")
+(display (daed:v op-q1 2))
+(newline)
+
+; ── D. Rejects ──
+(define d-dup (daed:topo-note! (daed:topo-add! ckt (daed:R "r1" 1 2 1e3))))
+(define d-dup-ok (daed:check-true (and (not (daed:topo-ok? d-dup))
+                                       (equal? (daed:topo-reason d-dup) "dup-name"))))
+(define d-val (daed:topo-note! (daed:topo-series-r! ckt "r1" "rs0" 0.0)))
+(define d-val-ok (daed:check-true (and (not (daed:topo-ok? d-val))
+                                       (equal? (daed:topo-reason d-val) "bad-value"))))
+(define d-miss (daed:topo-note! (daed:topo-remove! ckt "nope")))
+(define d-miss-ok (daed:check-true (and (not (daed:topo-ok? d-miss))
+                                        (equal? (daed:topo-reason d-miss) "not-found"))))
+(define ckt-f
+  (daed:circuit "fh"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "rl" 2 0 1e3)
+          (daed:F "f1" 2 0 "vin" 1.0))))
+(define d-f0 (daed:check-true (daed:topology-ok? ckt-f)))
+(define d-f (daed:topo-note! (daed:topo-remove! ckt-f "vin")))
+(define d-f-ok (daed:check-true (and (not (daed:topo-ok? d-f))
+                                     (equal? (daed:topo-reason d-f) "topology-after")
+                                     (daed:find-comp ckt-f "vin"))))
+
+; tap: move R2 off GND onto Vin (1,0) — valid, v2→0 via R1-R2 series to... 
+; R2 (1,0) parallels Vin. node 2 only on R1. Keep as a tap apply+restore.
+(define snap-t (daed:circuit-snapshot ckt))
+(define tap (daed:topo-note! (daed:topo-tap! ckt "r2" 1 0)))
+(define d-tap (daed:check-true (daed:topo-ok? tap)))
+(define op-t (daed:simulate-op ckt))
+(daed:stats-bump! "sim_runs")
+(define d-tap-v (daed:check-approx (daed:v op-t 2) Vin 1e-3))
+(daed:restore-circuit! ckt snap-t)
+(define d-tap-b (daed:check-eq (daed:comp-n2 (daed:find-comp ckt "r2")) 0))
+
+(display "D dup=")
+(display (daed:topo-reason d-dup))
+(display " bad-val=")
+(display (daed:topo-reason d-val))
+(display " f-ctrl=")
+(display (daed:topo-reason d-f))
+(newline)
+
+; ── E. Agent family search ──
+(define spec (daed:spec-v 2 2.5 0.05))
+(define ops
+  (list (daed:topo-op "parallel-c" "r2" "cx" 1e-6 0 0)
+        (daed:topo-op "tap" "r2" 1 0 0 0)
+        (daed:topo-op "remove" "nope" 0 0 0 0)
+        (daed:topo-op "parallel-r" "r2" "rpar" 2e3 0 0)
+        (daed:topo-op "series-r" "r1" "rsx" 1e3 0 0)))
+(define ev (daed:topo-search! ckt spec ops))
+(daed:stats-bump! "sim_runs")
+(daed:stats-bump! "agent_rounds")
+(define e-ok (daed:check-true (daed:search-reached? ev)))
+(define e-val (daed:check-approx (hash-ref ev "value" 0.0) 2.5 0.05))
+(define e-best (daed:check-true
+                 (or (equal? (daed:search-best ev) "parallel-r")
+                     (equal? (daed:search-best ev) "series-r"))))
+(define e-rej (daed:check-true (>= (daed:search-rejected ev) 1)))
+(define e-keep (daed:check-true
+                 (or (daed:find-comp ckt "rpar")
+                     (daed:find-comp ckt "rsx"))))
+
+(display "E search best=")
+(display (daed:search-best ev))
+(display " v=")
+(display (hash-ref ev "value" 0.0))
+(display " n=")
+(display (daed:search-n ev))
+(display " rejected=")
+(display (daed:search-rejected ev))
+(newline)
+
+(define logn (length (daed:mutlog)))
+(define log-ok (daed:check-true (>= logn 6)))
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(define all-ok
+  (and ver-ok n0-ok v0-ok
+       a-ok a-n a-v a-back-n a-gone a-back-v
+       b-ok b-n b-split b-v b-uns b-back-n b-back-v b-r1
+       c-ok c-dc c-mill c-vc c-has c-rm c-rst
+       d-dup-ok d-val-ok d-miss-ok d-f0 d-f-ok d-tap d-tap-v d-tap-b
+       e-ok e-val e-best e-rej e-keep
+       log-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: topology mutation surface (escapes=0)")
+    (newline)
+    (display "RESULT pass example=24-topo-mutate escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: topo-mutate denseness probe")
+    (newline)
+    (display "RESULT fail example=24-topo-mutate")
+    (newline)
+    (display "  a-ok=")
+    (display a-ok)
+    (display " b-ok=")
+    (display b-ok)
+    (display " b-v=")
+    (display b-v)
+    (display " c-mill=")
+    (display c-mill)
+    (display " d-f-ok=")
+    (display d-f-ok)
+    (display " e-ok=")
+    (display e-ok)
+    (display " e-best=")
+    (display e-best)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

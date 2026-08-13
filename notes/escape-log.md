@@ -120,6 +120,12 @@ are deterministic.
 No leave from \(V_A\). Spec eval, hill-climb / scale search, good-state
 snapshots, and log replay stay on mutate + `.op` / `.tran` / `.measure`.
 
+## Issue #25 (topology mutate)
+
+No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
+stay on `topology-ok?` + circuit snapshot. Restore now includes the
+component list so added devices disappear on rollback.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

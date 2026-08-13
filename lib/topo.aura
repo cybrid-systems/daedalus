@@ -1,0 +1,398 @@
+; lib/topo.aura — Limited topology mutation surface (issue #25 / M4)
+;
+; (require "topo" all:)
+;
+; Safe add/remove, series-R insert/undo, parallel C/R, tap move,
+; compensation C. Hermes topology-ok? before accepting. Snap+restore
+; on reject. topo-search! tries a family of ops and keeps the best.
+
+(export daed:topo-version
+        daed:n-comps
+        daed:two-terminal?
+        daed:topo-add!
+        daed:topo-remove!
+        daed:topo-series-r!
+        daed:topo-unseries!
+        daed:topo-parallel-c!
+        daed:topo-parallel-r!
+        daed:topo-comp-c!
+        daed:topo-tap!
+        daed:topo-op
+        daed:topo-apply!
+        daed:topo-search!
+        daed:topo-ok?
+        daed:topo-reason
+        daed:topo-name
+        daed:search-ok?
+        daed:search-reached?
+        daed:search-n
+        daed:search-best
+        daed:search-rejected)
+
+(require "netlist" all:)
+(require "mutate-circuit" all:)
+(require "evolve" all:)
+
+(define daed:topo-version 1)
+
+(define (daed:n-comps ckt)
+  (let ((n 0))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        n
+        (begin
+          (set! n (+ n 1))
+          (loop (cdr cs)))))))
+
+(define (daed:two-terminal? c)
+  (let ((ty (daed:comp-type c)))
+    (or (equal? ty "R") (equal? ty "C") (equal? ty "L")
+        (equal? ty "V") (equal? ty "I") (equal? ty "D"))))
+
+(define (daed:topo-res kind name)
+  (let ((h (hash)))
+    (hash-set! h "ok" #f)
+    (hash-set! h "reason" "init")
+    (hash-set! h "kind" kind)
+    (hash-set! h "name" name)
+    h))
+
+(define (daed:topo-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:topo-reason r)
+  (hash-ref r "reason" ""))
+
+(define (daed:topo-name r)
+  (hash-ref r "name" ""))
+
+(define (daed:filter-out-name cs name)
+  (let ((acc '()))
+    (let loop ((xs cs))
+      (if (null? xs)
+        (reverse acc)
+        (begin
+          (if (equal? (daed:comp-name (car xs)) name)
+            0
+            (set! acc (cons (car xs) acc)))
+          (loop (cdr xs)))))))
+
+(define (daed:topo-add! ckt comp)
+  (let ((res (daed:topo-res "add" "")))
+    (if (not comp)
+      (begin
+        (hash-set! res "reason" "no-comp")
+        res)
+      (let ((name (daed:comp-name comp)))
+        (hash-set! res "name" name)
+        (if (or (not (string? name)) (equal? name ""))
+          (begin
+            (hash-set! res "reason" "bad-name")
+            res)
+          (if (daed:find-comp ckt name)
+            (begin
+              (hash-set! res "reason" "dup-name")
+              res)
+            (if (not (daed:topology-ok? ckt))
+              (begin
+                (hash-set! res "reason" "topology")
+                res)
+              (let ((snap (daed:circuit-snapshot ckt)))
+                (hash-set! ckt "comps" (cons comp (daed:ckt-comps ckt)))
+                (if (daed:topology-ok? ckt)
+                  (begin
+                    (hash-set! res "ok" #t)
+                    (hash-set! res "reason" "applied")
+                    res)
+                  (begin
+                    (daed:restore-circuit! ckt snap)
+                    (hash-set! res "reason" "topology-after")
+                    res))))))))))
+
+(define (daed:topo-remove! ckt name)
+  (let ((res (daed:topo-res "remove" name)))
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((c (daed:find-comp ckt name)))
+        (if (not c)
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (if (<= (daed:n-comps ckt) 1)
+            (begin
+              (hash-set! res "reason" "empty")
+              res)
+            (let ((snap (daed:circuit-snapshot ckt)))
+              (hash-set! ckt "comps"
+                (daed:filter-out-name (daed:ckt-comps ckt) name))
+              (if (daed:topology-ok? ckt)
+                (begin
+                  (hash-set! res "ok" #t)
+                  (hash-set! res "reason" "applied")
+                  res)
+                (begin
+                  (daed:restore-circuit! ckt snap)
+                  (hash-set! res "reason" "topology-after")
+                  res)))))))))
+
+; Insert R in series at n1 of a two-terminal device. New node = max+1.
+(define (daed:topo-series-r! ckt through-name new-name r-value)
+  (let ((res (daed:topo-res "series-r" new-name)))
+    (hash-set! res "through" through-name)
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((th (daed:find-comp ckt through-name)))
+        (if (not th)
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (if (not (daed:two-terminal? th))
+            (begin
+              (hash-set! res "reason" "not-two-terminal")
+              res)
+            (if (daed:find-comp ckt new-name)
+              (begin
+                (hash-set! res "reason" "dup-name")
+                res)
+              (if (not (daed:value-ok? "R" r-value))
+                (begin
+                  (hash-set! res "reason" "bad-value")
+                  res)
+                (let ((old-n1 (daed:comp-n1 th))
+                      (nn (+ 1 (daed:max-node (daed:ckt-comps ckt))))
+                      (snap (daed:circuit-snapshot ckt)))
+                  (daed:comp-set-n1! th nn)
+                  (hash-set! ckt "comps"
+                    (cons (daed:R new-name old-n1 nn r-value)
+                          (daed:ckt-comps ckt)))
+                  (hash-set! res "node" nn)
+                  (if (daed:topology-ok? ckt)
+                    (begin
+                      (hash-set! res "ok" #t)
+                      (hash-set! res "reason" "applied")
+                      res)
+                    (begin
+                      (daed:restore-circuit! ckt snap)
+                      (hash-set! res "reason" "topology-after")
+                      res)))))))))))
+
+; Inverse of series-r: reconnect through across the series R, then drop it.
+(define (daed:topo-unseries! ckt through-name series-name)
+  (let ((res (daed:topo-res "unseries" series-name)))
+    (hash-set! res "through" through-name)
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((th (daed:find-comp ckt through-name))
+            (sr (daed:find-comp ckt series-name)))
+        (if (or (not th) (not sr))
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (let ((a (daed:comp-n1 sr))
+                (b (daed:comp-n2 sr))
+                (snap (daed:circuit-snapshot ckt))
+                (done #f))
+            (if (or (= (daed:comp-n1 th) a) (= (daed:comp-n1 th) b))
+              (begin
+                (if (= (daed:comp-n1 th) a)
+                  (daed:comp-set-n1! th b)
+                  (daed:comp-set-n1! th a))
+                (set! done #t))
+              0)
+            (if (or (= (daed:comp-n2 th) a) (= (daed:comp-n2 th) b))
+              (begin
+                (if (= (daed:comp-n2 th) a)
+                  (daed:comp-set-n2! th b)
+                  (daed:comp-set-n2! th a))
+                (set! done #t))
+              0)
+            (if (not done)
+              (begin
+                (hash-set! res "reason" "not-series")
+                res)
+              (begin
+                (hash-set! ckt "comps"
+                  (daed:filter-out-name (daed:ckt-comps ckt) series-name))
+                (if (daed:topology-ok? ckt)
+                  (begin
+                    (hash-set! res "ok" #t)
+                    (hash-set! res "reason" "applied")
+                    res)
+                  (begin
+                    (daed:restore-circuit! ckt snap)
+                    (hash-set! res "reason" "topology-after")
+                    res))))))))))
+
+(define (daed:topo-parallel-c! ckt across-name new-name c-value)
+  (let ((res (daed:topo-res "parallel-c" new-name)))
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((ac (daed:find-comp ckt across-name)))
+        (if (not ac)
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (let ((r (daed:topo-add! ckt
+                     (daed:C new-name (daed:comp-n1 ac) (daed:comp-n2 ac) c-value))))
+            (hash-set! r "kind" "parallel-c")
+            r)))))))
+
+(define (daed:topo-parallel-r! ckt across-name new-name r-value)
+  (let ((res (daed:topo-res "parallel-r" new-name)))
+    (if (not (daed:topology-ok? ckt))
+      (begin
+        (hash-set! res "reason" "topology")
+        res)
+      (let ((ac (daed:find-comp ckt across-name)))
+        (if (not ac)
+          (begin
+            (hash-set! res "reason" "not-found")
+            res)
+          (let ((r (daed:topo-add! ckt
+                     (daed:R new-name (daed:comp-n1 ac) (daed:comp-n2 ac) r-value))))
+            (hash-set! r "kind" "parallel-r")
+            r)))))))
+
+(define (daed:topo-comp-c! ckt name n1 n2 c-value)
+  (let ((r (daed:topo-add! ckt (daed:C name n1 n2 c-value))))
+    (hash-set! r "kind" "comp-c")
+    r))
+
+(define (daed:topo-tap! ckt name n1 n2)
+  (let ((r (daed:mutate-nodes! ckt name n1 n2)))
+    (hash-set! r "kind" "tap")
+    r))
+
+; Structured op for family search.
+(define (daed:topo-op kind a b c d e)
+  (let ((h (hash)))
+    (hash-set! h "kind" kind)
+    (hash-set! h "a" a)
+    (hash-set! h "b" b)
+    (hash-set! h "c" c)
+    (hash-set! h "d" d)
+    (hash-set! h "e" e)
+    h))
+
+(define (daed:topo-apply! ckt op)
+  (if (not op)
+    (daed:topo-res "none" "")
+    (let ((k (hash-ref op "kind" "")))
+      (if (equal? k "add")
+        (daed:topo-add! ckt
+          (daed:comp (hash-ref op "a" "R")
+                     (hash-ref op "b" "")
+                     (hash-ref op "c" 0)
+                     (hash-ref op "d" 0)
+                     (hash-ref op "e" 0.0)))
+        (if (equal? k "remove")
+          (daed:topo-remove! ckt (hash-ref op "a" ""))
+          (if (equal? k "series-r")
+            (daed:topo-series-r! ckt
+              (hash-ref op "a" "")
+              (hash-ref op "b" "")
+              (hash-ref op "c" 0.0))
+            (if (equal? k "unseries")
+              (daed:topo-unseries! ckt
+                (hash-ref op "a" "")
+                (hash-ref op "b" ""))
+              (if (equal? k "parallel-c")
+                (daed:topo-parallel-c! ckt
+                  (hash-ref op "a" "")
+                  (hash-ref op "b" "")
+                  (hash-ref op "c" 0.0))
+                (if (equal? k "parallel-r")
+                  (daed:topo-parallel-r! ckt
+                    (hash-ref op "a" "")
+                    (hash-ref op "b" "")
+                    (hash-ref op "c" 0.0))
+                  (if (equal? k "comp-c")
+                    (daed:topo-comp-c! ckt
+                      (hash-ref op "a" "")
+                      (hash-ref op "b" 0)
+                      (hash-ref op "c" 0)
+                      (hash-ref op "d" 0.0))
+                    (if (equal? k "tap")
+                      (daed:topo-tap! ckt
+                        (hash-ref op "a" "")
+                        (hash-ref op "b" 0)
+                        (hash-ref op "c" 0))
+                      (let ((r (daed:topo-res k "")))
+                        (hash-set! r "reason" "bad-kind")
+                        r))))))))))))
+
+; Try each op from the original snapshot; keep the lowest spec error.
+(define (daed:topo-search! ckt spec ops)
+  (let ((origin (daed:circuit-snapshot ckt))
+        (e0 (daed:eval-spec ckt spec))
+        (best-err 1e300)
+        (best-snap #f)
+        (best-kind "")
+        (n 0)
+        (n-rej 0)
+        (reached #f)
+        (res (hash)))
+    (if (daed:spec-ok? e0)
+      (begin
+        (set! best-err (daed:spec-err e0))
+        (set! best-snap (daed:circuit-snapshot ckt))
+        (if (daed:spec-pass? e0)
+          (set! reached #t)
+          0))
+      0)
+    (let loop ((xs ops))
+      (if (or reached (null? xs))
+        0
+        (begin
+          (daed:restore-circuit! ckt origin)
+          (let ((ap (daed:topo-apply! ckt (car xs))))
+            (set! n (+ n 1))
+            (if (not (daed:topo-ok? ap))
+              (set! n-rej (+ n-rej 1))
+              (let ((e1 (daed:eval-spec ckt spec)))
+                (if (and (daed:spec-ok? e1)
+                         (< (daed:spec-err e1) best-err))
+                  (begin
+                    (set! best-err (daed:spec-err e1))
+                    (set! best-snap (daed:circuit-snapshot ckt))
+                    (set! best-kind (hash-ref ap "kind" ""))
+                    (if (daed:spec-pass? e1)
+                      (set! reached #t)
+                      0))
+                  0))))
+          (loop (cdr xs)))))
+    (if best-snap
+      (daed:restore-circuit! ckt best-snap)
+      (daed:restore-circuit! ckt origin))
+    (let ((ef (daed:eval-spec ckt spec)))
+      (hash-set! res "ok" (and (daed:spec-ok? ef) (daed:spec-pass? ef)))
+      (hash-set! res "reached" (hash-ref res "ok" #f))
+      (hash-set! res "n" n)
+      (hash-set! res "rejected" n-rej)
+      (hash-set! res "best" best-kind)
+      (hash-set! res "err" (daed:spec-err ef))
+      (hash-set! res "value" (daed:spec-value ef))
+      res)))
+
+(define (daed:search-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:search-reached? r)
+  (hash-ref r "reached" #f))
+
+(define (daed:search-n r)
+  (hash-ref r "n" 0))
+
+(define (daed:search-best r)
+  (hash-ref r "best" ""))
+
+(define (daed:search-rejected r)
+  (hash-ref r "rejected" 0))
