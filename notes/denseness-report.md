@@ -172,9 +172,9 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 
 ---
 
-## Next (post-P0 / post-P1)
+## Next (post-M4)
 
-1. Topology mutate denseness (insert/remove component under Hermes invariants)
+1. Milestone 5 — native C++ kernel escape ([#28](https://github.com/cybrid-systems/daedalus/issues/28)–#34); see [roadmap.md](roadmap.md)
 2. Optional Aether `orch:*` multi-agent compose
 3. PNP / LED defaults / simple astable as further educational coverage
 4. Keep [escape-log.md](escape-log.md) / [host-residuals.md](host-residuals.md) current

@@ -155,6 +155,12 @@ Daedalus is better at teaching students how to **understand and reshape circuits
 - Dense Newton-Raphson `.op` and BE+NR `.tran`
 - Linear probes unchanged (one-shot path when no D/Q)
 
+**M0–M4** ([issue #27](https://github.com/cybrid-systems/daedalus/issues/27), [notes/roadmap.md](notes/roadmap.md))  
+P0 core, educational nonlinear, adaptive `.tran`, MOSFET, `.measure`, convergence aids, Monte Carlo, agent evolve, topology mutate, SPICE export. **Done.**
+
+**M5** ([issue #28](https://github.com/cybrid-systems/daedalus/issues/28))  
+Optional metered C++ kernel hot-swap. Open.
+
 **Non-goals (P0 / P1)**  
 Full BSIM, commercial-grade sparse solvers, schematic capture UI, mixed-signal co-simulation.
 

@@ -60,8 +60,9 @@ Primary objects under test:
 - Probe `25-spice-export` — FlatAST → SPICE export, escapes=0 (issue #26)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
+- Roadmap: M0–M4 done (issue #27). Next is M5 native kernel escape (#28–#34).
 
-**Post-P1:** topology mutate, multi-agent compose, PNP / astable coverage, richer viz layout (as needed).
+**Post-M4:** M5 C++ hot-swap (metered); optional multi-agent compose, PNP / astable, richer viz.
 
 ## When generating or reviewing code
 

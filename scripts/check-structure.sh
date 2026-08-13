@@ -13,6 +13,7 @@ required=(
   "notes/denseness-report.md"
   "notes/escape-log.md"
   "notes/host-residuals.md"
+  "notes/roadmap.md"
   "prompts/GROK.md"
   "lib/README.md"
   "lib/daedalus-min.aura"

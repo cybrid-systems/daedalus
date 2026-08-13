@@ -92,3 +92,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] Spec-driven agent parameter search (issue #24, probe 23)
 - [x] Limited topology mutation surface (issue #25, probe 24)
 - [x] SPICE export for sign-off (issue #26, probe 25)
+- [x] Roadmap M0–M4 recorded (issue #27); M5 native kernel remains open (#28)
