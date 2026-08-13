@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 + M0–M3** — probes **00–03, 05–20** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
+**Status:** **Phase 5 + M0–M3** — probes **00–03, 05–21** PASS; core \(E=0\). Live VLM extract and live ngspice are optional host oracles.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -53,6 +53,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [18](../examples/18-mosfet/) | Level-1 NMOS (issue #19) | **PASS** | 0 | 0 |
 | [19](../examples/19-measure/) | `.measure` + CSV (issue #20) | **PASS** | 0 | 0 |
 | [20](../examples/20-converge-aids/) | Gmin / source / ptran (issue #21) | **PASS** | 0 | 0 |
+| [21](../examples/21-step-temp/) | `.step` + temperature (issue #22) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -125,6 +126,12 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Gmin-to-ground stepping repairs empty DC rows (floating C / MOSFET gate).
 - Source stepping ramps V/I 0.2→1; ptran adds grounded C then a final DC NR.
 - `daed:op-aid` / `aid-steps` / `aid-tried` are queryable. Cold `simulate-op` unchanged.
+
+### Issue #22 narrative (`.step` + temperature)
+
+- `step-lin` / `step-log` / `step-list`; `sweep-op`, `sweep-tran`, `sweep-op-2`, `sweep-temp-op`.
+- `daed:set-temp!` scales D/Q `Is` (SPICE XTI=3, EG=1.11) and `Vt=kT/q`; MOSFET `Vto` at −2 mV/°C. At `T=Tnom` scale=1.
+- Agent: `daed:sweep-best` picks the step closest to a target voltage.
 
 ## Judgment
 

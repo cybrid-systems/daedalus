@@ -1,0 +1,198 @@
+; examples/21-step-temp/main.aura
+;
+; Milestone 3 / issue #22 — .step sweeps + temperature.
+;   A. Linear R2 sweep on a divider (family of DC points)
+;   B. Log list + agent pick closest to 2.5 V
+;   C. Nested R1×R2 .op grid
+;   D. Diode temperature sweep: Vd drops as Is rises
+;   E. Capacitor .tran sweep: larger C → lower v(τ)
+;
+; Axes: step-lin/log + sweep-op/tran/temp + device T scaling
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/21-step-temp/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 21-step-temp: .step + temperature ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " step=")
+(display daed:step-version)
+(display " devices=")
+(display daed:devices-version)
+(display " T=")
+(display daed:temp)
+(newline)
+
+(define ver-ok (daed:check-true (and (number? daed:step-version)
+                                     (>= daed:step-version 1)
+                                     (number? daed:devices-version)
+                                     (>= daed:devices-version 3))))
+
+(define Vin 5.0)
+(define ckt
+  (daed:circuit "div"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+
+; ── A. Linear R2 sweep ──
+(define rs (daed:step-lin 1e3 3e3 3))
+(define lin-n (daed:check-eq (length rs) 3))
+(define lin-a (daed:check-approx (car rs) 1e3 1e-9))
+(define lin-b (daed:check-approx (car (cdr (cdr rs))) 3e3 1e-6))
+(define sw-r (daed:sweep-op ckt "r2" "value" rs 2))
+(daed:stats-bump! "sim_runs")
+(define a-ok (daed:check-true (daed:sweep-ok? sw-r)))
+(define vv (daed:sweep-v sw-r))
+(define a0 (daed:check-rel (vector-ref vv 0) 2.5 1e-6 1e-9))
+(define a1 (daed:check-rel (vector-ref vv 1) (/ 10.0 3.0) 1e-6 1e-9))
+(define a2 (daed:check-rel (vector-ref vv 2) 3.75 1e-6 1e-9))
+(define r2-back (daed:check-approx
+                  (daed:comp-value (daed:find-comp ckt "r2")) 2e3 1e-9))
+
+(display "A R2 sweep v=")
+(display (vector-ref vv 0))
+(display " ")
+(display (vector-ref vv 1))
+(display " ")
+(display (vector-ref vv 2))
+(newline)
+
+; ── B. Agent pick ──
+(define bi (daed:sweep-best sw-r 2.5))
+(define best-ok (daed:check-eq bi 0))
+
+; ── C. Nested R1 × R2 ──
+(define r1s (daed:step-list (list 1e3 2e3)))
+(define r2s (daed:step-list (list 1e3 2e3)))
+(define sw2 (daed:sweep-op-2 ckt "r1" "value" r1s "r2" "value" r2s 2))
+(daed:stats-bump! "sim_runs")
+(define c-ok (daed:check-true (and (daed:sweep-ok? sw2)
+                                  (= (daed:sweep-n sw2) 4))))
+(define g (daed:sweep-v sw2))
+(define c00 (daed:check-rel (vector-ref g 0) 2.5 1e-6 1e-9))
+(define c01 (daed:check-rel (vector-ref g 1) (/ 10.0 3.0) 1e-6 1e-9))
+
+(display "C nested n=")
+(display (daed:sweep-n sw2))
+(display " v(1k,1k)=")
+(display (vector-ref g 0))
+(newline)
+
+; ── D. Diode temperature ──
+(define ckt-d
+  (daed:circuit "diode"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:D "d1" 2 0))))
+
+(define s27 (daed:is-scale))
+(define ts (daed:step-list (list 27.0 100.0)))
+(define sw-t (daed:sweep-temp-op ckt-d ts 2))
+(daed:stats-bump! "sim_runs")
+(define t-ok (daed:check-true (daed:sweep-ok? sw-t)))
+(define tv (daed:sweep-v sw-t))
+(define vd27 (vector-ref tv 0))
+(define vd100 (vector-ref tv 1))
+(define t-vd (daed:check-true (and (number? vd27) (> vd27 0.55) (< vd27 0.85))))
+(define t-drop (daed:check-true (and (number? vd100) (< vd100 (- vd27 0.05)))))
+(define t-scale (daed:check-true (and (number? s27) (< (abs (- s27 1.0)) 1e-12))))
+(define t-back (daed:check-approx daed:temp 27.0 1e-12))
+(daed:set-temp! 100.0)
+(define s100 (daed:is-scale))
+(daed:set-temp! 27.0)
+(define t-is (daed:check-true (and (number? s100) (> s100 10.0))))
+
+(display "D diode T=27 vd=")
+(display vd27)
+(display " T=100 vd=")
+(display vd100)
+(display " Is-scale(100)=")
+(display s100)
+(newline)
+
+; ── E. Capacitor .tran family ──
+(define tau 1e-3)
+(define ckt-c
+  (daed:circuit "rc"
+    (list (daed:V "vin" 1 0 Vin)
+          (daed:R "r1" 1 2 1e3)
+          (daed:C "c1" 2 0 1e-6))))
+
+(define cs (daed:step-list (list 5e-7 1e-6 2e-6)))
+(define dt (/ tau 50.0))
+(define ns (daed:nsteps-for tau dt))
+(define sw-c (daed:sweep-tran ckt-c "c1" "value" cs dt ns 2))
+(daed:stats-bump! "sim_runs")
+(define e-ok (daed:check-true (daed:sweep-ok? sw-c)))
+(define ev (daed:sweep-vend sw-c))
+(define e-dec (daed:check-true (and (number? (vector-ref ev 0))
+                                   (number? (vector-ref ev 1))
+                                   (number? (vector-ref ev 2))
+                                   (> (vector-ref ev 0) (vector-ref ev 1))
+                                   (> (vector-ref ev 1) (vector-ref ev 2)))))
+(define e-mid (daed:check-rel (vector-ref ev 1)
+                             (* Vin (- 1.0 (exp -1.0))) 0.08 1e-6))
+
+(display "E C-sweep v(tau)=")
+(display (vector-ref ev 0))
+(display " ")
+(display (vector-ref ev 1))
+(display " ")
+(display (vector-ref ev 2))
+(newline)
+
+(define lg (daed:step-log 1e3 1e5 3))
+(define log-ok (daed:check-true (and (= (length lg) 3)
+                                    (< (abs (- (car lg) 1e3)) 1e-6)
+                                    (< (abs (- (car (cdr (cdr lg))) 1e5)) 1.0))))
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+(define all-ok
+  (and ver-ok
+       lin-n lin-a lin-b a-ok a0 a1 a2 r2-back best-ok
+       c-ok c00 c01
+       t-ok t-vd t-drop t-scale t-back t-is
+       e-ok e-dec e-mid
+       log-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)
+       (>= (daed:stats-ref "sim_runs") 3)))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(if all-ok
+  (begin
+    (display "PASS: .step + temperature sweep (escapes=0)")
+    (newline)
+    (display "RESULT pass example=21-step-temp escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: step/temp denseness probe")
+    (newline)
+    (display "RESULT fail example=21-step-temp")
+    (newline)
+    (display "  a-ok=")
+    (display a-ok)
+    (display " a0=")
+    (display a0)
+    (display " best-ok=")
+    (display best-ok)
+    (display " c-ok=")
+    (display c-ok)
+    (display " t-drop=")
+    (display t-drop)
+    (display " t-is=")
+    (display t-is)
+    (display " e-dec=")
+    (display e-dec)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

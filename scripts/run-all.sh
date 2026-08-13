@@ -25,6 +25,7 @@ PROBES=(
   18-mosfet
   19-measure
   20-converge-aids
+  21-step-temp
 )
 
 pass=0

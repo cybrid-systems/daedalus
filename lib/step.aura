@@ -1,0 +1,317 @@
+; lib/step.aura — .step sweeps + temperature (issue #22 / M3)
+;
+; (require "step" all:)
+;
+; Linear / log / list parameter grids. Nested two-parameter .op.
+; Temperature is a global (daed:set-temp!) that scales D/Q Is and Vt
+; and MOSFET Vto. Results are vectors an agent can query.
+
+(export daed:step-version
+        daed:step-lin
+        daed:step-log
+        daed:step-list
+        daed:sweep-op
+        daed:sweep-tran
+        daed:sweep-temp-op
+        daed:sweep-op-2
+        daed:sweep-ok?
+        daed:sweep-n
+        daed:sweep-values
+        daed:sweep-v
+        daed:sweep-vend
+        daed:sweep-best
+        daed:sweep-waves
+        daed:sweep-v1
+        daed:sweep-v2)
+
+(require "netlist" all:)
+(require "devices" all:)
+(require "solve" all:)
+(require "tran" all:)
+(require "probe" all:)
+(require "mutate-circuit" all:)
+
+(define daed:step-version 1)
+
+(define (daed:list-n xs)
+  (let ((n 0))
+    (let loop ((ys xs))
+      (if (null? ys)
+        n
+        (begin
+          (set! n (+ n 1))
+          (loop (cdr ys)))))))
+
+; Newest-first list → chronological vector.
+(define (daed:rev->vec xs)
+  (let ((n (daed:list-n xs))
+        (p xs))
+    (let ((v (make-vector n 0.0))
+          (i (- n 1)))
+      (while (lambda () (>= i 0))
+        (lambda ()
+          (vector-set! v i (car p))
+          (set! p (cdr p))
+          (set! i (- i 1))))
+      v)))
+
+(define (daed:step-lin a b npts)
+  (let ((n (daed:as-int npts)))
+    (if (or (not (number? a)) (not (number? b)) (< n 1))
+      '()
+      (if (= n 1)
+        (list a)
+        (let ((acc '())
+              (i 0)
+              (d (/ (- b a) (- n 1.0))))
+          (while (lambda () (< i n))
+            (lambda ()
+              (set! acc (cons (+ a (* i d)) acc))
+              (set! i (+ i 1))))
+          (let ((out '())
+                (p acc))
+            (let loop ((q p))
+              (if (null? q)
+                out
+                (begin
+                  (set! out (cons (car q) out))
+                  (loop (cdr q)))))))))))
+
+(define (daed:step-log a b npts)
+  (if (or (not (number? a)) (not (number? b))
+          (<= a 0.0) (<= b 0.0))
+    '()
+    (let ((n (daed:as-int npts)))
+      (if (< n 1)
+        '()
+        (if (= n 1)
+          (list a)
+          (let ((la (log a))
+                (lb (log b))
+                (acc '())
+                (i 0)
+                (d 0.0))
+            (set! d (/ (- lb la) (- n 1.0)))
+            (while (lambda () (< i n))
+              (lambda ()
+                (set! acc (cons (exp (+ la (* i d))) acc))
+                (set! i (+ i 1))))
+            (let ((out '())
+                  (p acc))
+              (let loop ((q p))
+                (if (null? q)
+                  out
+                  (begin
+                    (set! out (cons (car q) out))
+                    (loop (cdr q))))))))))))
+
+(define (daed:step-list xs)
+  (if (or (null? xs) (pair? xs))
+    xs
+    '()))
+
+(define (daed:sweep-set! ckt name key val)
+  (let ((c (daed:find-comp ckt name)))
+    (if (not c)
+      #f
+      (begin
+        (if (or (not (string? key))
+                (equal? key "")
+                (equal? key "value"))
+          (daed:comp-set-value! c val)
+          (daed:comp-set-param! c key val))
+        #t))))
+
+(define (daed:sweep-op ckt name key values node)
+  (let ((snap (daed:circuit-snapshot ckt))
+        (n 0)
+        (ok #t)
+        (vacc '())
+        (pval '()))
+    (let loop ((xs values))
+      (if (null? xs)
+        0
+        (begin
+          (if (and (number? (car xs))
+                   (daed:sweep-set! ckt name key (car xs)))
+            (let ((op (daed:simulate-op ckt)))
+              (set! n (+ n 1))
+              (set! vacc (cons (daed:v op node) vacc))
+              (set! pval (cons (car xs) pval))
+              (if (not (daed:op-ok? op))
+                (set! ok #f)
+                0))
+            (set! ok #f))
+          (loop (cdr xs)))))
+    (daed:restore-circuit! ckt snap)
+    (let ((h (hash)))
+      (hash-set! h "ok" ok)
+      (hash-set! h "n" n)
+      (hash-set! h "name" name)
+      (hash-set! h "key" key)
+      (hash-set! h "node" node)
+      (hash-set! h "kind" "op")
+      (hash-set! h "values" (daed:rev->vec pval))
+      (hash-set! h "v" (daed:rev->vec vacc))
+      h)))
+
+(define (daed:sweep-tran ckt name key values dt nsteps node)
+  (let ((snap (daed:circuit-snapshot ckt))
+        (n 0)
+        (ok #t)
+        (vend '())
+        (pval '())
+        (waves '()))
+    (let loop ((xs values))
+      (if (null? xs)
+        0
+        (begin
+          (if (and (number? (car xs))
+                   (daed:sweep-set! ckt name key (car xs)))
+            (let ((tr (daed:simulate-tran ckt dt nsteps)))
+              (set! n (+ n 1))
+              (set! pval (cons (car xs) pval))
+              (set! vend (cons (daed:tran-v tr node) vend))
+              (set! waves (cons tr waves))
+              (if (not (daed:tran-ok? tr))
+                (set! ok #f)
+                0))
+            (set! ok #f))
+          (loop (cdr xs)))))
+    (daed:restore-circuit! ckt snap)
+    (let ((h (hash)))
+      (hash-set! h "ok" ok)
+      (hash-set! h "n" n)
+      (hash-set! h "name" name)
+      (hash-set! h "key" key)
+      (hash-set! h "node" node)
+      (hash-set! h "kind" "tran")
+      (hash-set! h "values" (daed:rev->vec pval))
+      (hash-set! h "vend" (daed:rev->vec vend))
+      (hash-set! h "waves" (reverse waves))
+      h)))
+
+(define (daed:sweep-temp-op ckt temps node)
+  (let ((t0 daed:temp)
+        (n 0)
+        (ok #t)
+        (vacc '())
+        (pval '()))
+    (let loop ((xs temps))
+      (if (null? xs)
+        0
+        (begin
+          (if (number? (car xs))
+            (begin
+              (daed:set-temp! (car xs))
+              (let ((op (daed:simulate-op ckt)))
+                (set! n (+ n 1))
+                (set! vacc (cons (daed:v op node) vacc))
+                (set! pval (cons (car xs) pval))
+                (if (not (daed:op-ok? op))
+                  (set! ok #f)
+                  0)))
+            (set! ok #f))
+          (loop (cdr xs)))))
+    (daed:set-temp! t0)
+    (let ((h (hash)))
+      (hash-set! h "ok" ok)
+      (hash-set! h "n" n)
+      (hash-set! h "name" "temp")
+      (hash-set! h "key" "temp")
+      (hash-set! h "node" node)
+      (hash-set! h "kind" "temp")
+      (hash-set! h "values" (daed:rev->vec pval))
+      (hash-set! h "v" (daed:rev->vec vacc))
+      h)))
+
+; Nested two-parameter .op. v is length n1*n2, row-major in vs1 then vs2.
+(define (daed:sweep-op-2 ckt n1 k1 vs1 n2 k2 vs2 node)
+  (let ((snap (daed:circuit-snapshot ckt))
+        (n 0)
+        (ok #t)
+        (vacc '())
+        (aacc '())
+        (bacc '()))
+    (let loop1 ((xs vs1))
+      (if (null? xs)
+        0
+        (begin
+          (if (and (number? (car xs))
+                   (daed:sweep-set! ckt n1 k1 (car xs)))
+            (let loop2 ((ys vs2))
+              (if (null? ys)
+                0
+                (begin
+                  (if (and (number? (car ys))
+                           (daed:sweep-set! ckt n2 k2 (car ys)))
+                    (let ((op (daed:simulate-op ckt)))
+                      (set! n (+ n 1))
+                      (set! vacc (cons (daed:v op node) vacc))
+                      (set! aacc (cons (car xs) aacc))
+                      (set! bacc (cons (car ys) bacc))
+                      (if (not (daed:op-ok? op))
+                        (set! ok #f)
+                        0))
+                    (set! ok #f))
+                  (loop2 (cdr ys)))))
+            (set! ok #f))
+          (loop1 (cdr xs)))))
+    (daed:restore-circuit! ckt snap)
+    (let ((h (hash)))
+      (hash-set! h "ok" ok)
+      (hash-set! h "n" n)
+      (hash-set! h "name" n1)
+      (hash-set! h "key" k1)
+      (hash-set! h "node" node)
+      (hash-set! h "kind" "op2")
+      (hash-set! h "values" (daed:rev->vec aacc))
+      (hash-set! h "v1" (daed:rev->vec aacc))
+      (hash-set! h "v2" (daed:rev->vec bacc))
+      (hash-set! h "v" (daed:rev->vec vacc))
+      h)))
+
+(define (daed:sweep-ok? sw)
+  (hash-ref sw "ok" #f))
+
+(define (daed:sweep-n sw)
+  (hash-ref sw "n" 0))
+
+(define (daed:sweep-values sw)
+  (hash-ref sw "values" (make-vector 0 0.0)))
+
+(define (daed:sweep-v sw)
+  (hash-ref sw "v" (make-vector 0 0.0)))
+
+(define (daed:sweep-vend sw)
+  (hash-ref sw "vend" (make-vector 0 0.0)))
+
+(define (daed:sweep-waves sw)
+  (hash-ref sw "waves" '()))
+
+(define (daed:sweep-v1 sw)
+  (hash-ref sw "v1" (make-vector 0 0.0)))
+
+(define (daed:sweep-v2 sw)
+  (hash-ref sw "v2" (make-vector 0 0.0)))
+
+; Index of the sample closest to target (on sweep-v, or vend if no v).
+(define (daed:sweep-best sw target)
+  (let ((wv (hash-ref sw "v" #f)))
+    (if (not wv)
+      (set! wv (hash-ref sw "vend" (make-vector 0 0.0)))
+      0)
+    (let ((n (vector-length wv))
+          (best 0)
+          (bestd 1e300)
+          (i 0))
+      (while (lambda () (< i n))
+        (lambda ()
+          (let ((d (abs (- (vector-ref wv i) target))))
+            (if (< d bestd)
+              (begin
+                (set! bestd d)
+                (set! best i))
+              0))
+          (set! i (+ i 1))))
+      best)))

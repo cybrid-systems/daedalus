@@ -104,6 +104,11 @@ by viz (not a new numerical escape).
 No leave from \(V_A\). Gmin-to-ground, source ramp, and pseudo-transient reuse
 the existing dense NR / GE kernel. Cold `simulate-op` is unchanged.
 
+## Issue #22 (.step + temperature)
+
+No leave from \(V_A\). Sweeps mutate-and-restore on the existing circuit
+snapshot. Temperature scaling is applied inside the D/Q/M stamp.
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

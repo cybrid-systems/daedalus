@@ -79,6 +79,14 @@
         daed:measure-final daed:measure-when daed:measure-delay
         daed:measure-risetime daed:measure-summary
         daed:tran->csv daed:write-tran-csv!
+        ; step / temperature (issue #22)
+        daed:step-version
+        daed:temp daed:tnom daed:set-temp! daed:temp-k daed:vt-now daed:is-scale
+        daed:step-lin daed:step-log daed:step-list
+        daed:sweep-op daed:sweep-tran daed:sweep-temp-op daed:sweep-op-2
+        daed:sweep-ok? daed:sweep-n daed:sweep-values daed:sweep-v
+        daed:sweep-vend daed:sweep-best daed:sweep-waves
+        daed:sweep-v1 daed:sweep-v2
         ; mutate (Phase 3)
         daed:mutate-version
         daed:find-comp daed:clone-comp daed:clone-circuit
@@ -133,6 +141,7 @@
 (require "tran" all:)
 (require "probe" all:)
 (require "measure" all:)
+(require "step" all:)
 (require "mutate-circuit" all:)
 (require "agent" all:)
 (require "viz" all:)

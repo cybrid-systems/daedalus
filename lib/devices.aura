@@ -21,6 +21,12 @@
         daed:stamp-diode-nr!
         daed:stamp-bjt-nr!
         daed:stamp-mos-nr!
+        daed:temp
+        daed:tnom
+        daed:set-temp!
+        daed:temp-k
+        daed:vt-now
+        daed:is-scale
         daed:stamp-nonlinear!
         daed:stamp-system-nr
         daed:stamp-system-nr-tran)
@@ -28,8 +34,59 @@
 (require "netlist" all:)
 (require "stamp" all:)
 
-; 2 = issue #19 Level-1 MOSFET
-(define daed:devices-version 2)
+; 3 = issue #22 temperature scaling (Is, Vt, Vto)
+(define daed:devices-version 3)
+
+(define daed:tnom 27.0)
+(define daed:temp 27.0)
+(define daed:eg 1.11)
+(define daed:k-ev 8.617333262145e-5)
+(define daed:vto-tc -0.002)
+
+(define (daed:set-temp! t)
+  (if (number? t)
+    (set! daed:temp t)
+    0)
+  daed:temp)
+
+(define (daed:temp-k)
+  (+ daed:temp 273.15))
+
+(define (daed:tnom-k)
+  (+ daed:tnom 273.15))
+
+(define (daed:temp-off?)
+  (< (abs (- daed:temp daed:tnom)) 1e-12))
+
+(define (daed:vt-now)
+  (* daed:k-ev (daed:temp-k)))
+
+; SPICE-like: (T/Tnom)^3 * exp(Eg/k (1/Tnom − 1/T)). 1.0 at T=Tnom.
+(define (daed:is-scale)
+  (if (daed:temp-off?)
+    1.0
+    (let ((T (daed:temp-k))
+          (T0 (daed:tnom-k)))
+      (if (or (<= T 1.0) (<= T0 1.0))
+        1.0
+        (let ((ratio (/ T T0))
+              (egk (/ daed:eg daed:k-ev)))
+          (* (* (* ratio ratio) ratio)
+             (exp (* egk (- (/ 1.0 T0) (/ 1.0 T))))))))))
+
+(define (daed:is-eff c)
+  (* (daed:comp-value c) (daed:is-scale)))
+
+(define (daed:vt-eff c)
+  (if (daed:temp-off?)
+    (hash-ref c "vt" 0.026)
+    (daed:vt-now)))
+
+(define (daed:vto-eff c)
+  (let ((vto (hash-ref c "vto" 0.8)))
+    (if (daed:temp-off?)
+      vto
+      (+ vto (* daed:vto-tc (- daed:temp daed:tnom))))))
 
 (define daed:exp-clip 40.0)
 (define daed:sqrt2 1.414213562)
@@ -175,9 +232,9 @@
 (define (daed:stamp-diode-nr! J F n x x-old c)
   (let ((n1 (daed:comp-n1 c))
         (n2 (daed:comp-n2 c))
-        (Is (daed:comp-value c))
+        (Is (daed:is-eff c))
         (nn (hash-ref c "n" 1.0))
-        (vt (hash-ref c "vt" 0.026))
+        (vt (daed:vt-eff c))
         (gmin (hash-ref c "gmin" 1e-12)))
     (if (or (not (number? Is)) (<= Is 0.0)
             (not (number? nn)) (<= nn 0.0)
@@ -205,10 +262,10 @@
   (let ((nc (daed:comp-nc c))
         (nb (daed:comp-nb c))
         (ne (daed:comp-ne c))
-        (Is (daed:comp-value c))
+        (Is (daed:is-eff c))
         (bf (hash-ref c "bf" 100.0))
         (br (hash-ref c "br" 1.0))
-        (vt (hash-ref c "vt" 0.026))
+        (vt (daed:vt-eff c))
         (gmin (hash-ref c "gmin" 1e-12))
         (vbe 0.0)
         (vbc 0.0)
@@ -328,7 +385,7 @@
         (if (or (not (number? gmin)) (< gmin 0.0))
           (set! gmin 1e-12)
           0)
-        (set! vov (- vgs vto))
+        (set! vov (- vgs (daed:vto-eff c)))
         (if (<= vov 0.0)
           (begin
             (set! ids 0.0)

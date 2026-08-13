@@ -289,6 +289,12 @@ Convergence aids ([issue #21](https://github.com/cybrid-systems/daedalus/issues/
 ./scripts/run-aura.sh examples/20-converge-aids/main.aura
 ```
 
+Parameter `.step` + temperature ([issue #22](https://github.com/cybrid-systems/daedalus/issues/22)):
+
+```bash
+./scripts/run-aura.sh examples/21-step-temp/main.aura
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a
