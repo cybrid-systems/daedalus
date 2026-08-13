@@ -1,0 +1,289 @@
+; lib/ir.aura — Schematic IR + conversion (issue #6 / #7)
+;
+; (require "ir" all:)
+;
+; Hash-based daedalus-ir/1. Pure Aura. No JSON parser (host residual).
+; VLM / Python emit this shape; conversion to daed:circuit is deterministic.
+
+(export daed:ir-version
+        daed:ir-schema-id
+        daed:str-ends?
+        daed:str-drop-end
+        daed:parse-value
+        daed:node-id
+        daed:ir-new
+        daed:ir-comp
+        daed:ir-comp3
+        daed:ir-add-comp!
+        daed:ir-title
+        daed:ir-gnd
+        daed:ir-comps
+        daed:ir->circuit
+        daed:circuit->ir
+        daed:ir-ex-divider
+        daed:ir-ex-rc
+        daed:ir-ex-series-r
+        daed:ir-ex-norton
+        daed:ir-ex-diode)
+
+(require "netlist" all:)
+
+(define daed:ir-version 1)
+(define daed:ir-schema-id "daedalus-ir/1")
+
+(define (daed:str-ends? s suf)
+  (if (or (not (string? s)) (not (string? suf)))
+    #f
+    (let ((n (string-length s))
+          (m (string-length suf)))
+      (if (< n m)
+        #f
+        (equal? (substring s (- n m) n) suf)))))
+
+(define (daed:str-drop-end s n)
+  (if (or (not (string? s)) (not (number? n)) (< n 0))
+    s
+    (let ((len (string-length s)))
+      (if (>= n len)
+        ""
+        (substring s 0 (- len n))))))
+
+; Engineering value: number, or string "2.2k", "1uF", "5V".
+; Numeric run is taken from the start; the rest is SI prefix + unit.
+(define (daed:parse-value v)
+  (if (number? v)
+    v
+    (if (not (string? v))
+      #f
+      (daed:parse-value-str v))))
+
+(define (daed:num-char? ch)
+  (or (equal? ch "0") (equal? ch "1") (equal? ch "2") (equal? ch "3")
+      (equal? ch "4") (equal? ch "5") (equal? ch "6") (equal? ch "7")
+      (equal? ch "8") (equal? ch "9") (equal? ch ".") (equal? ch "-")
+      (equal? ch "+") (equal? ch "e") (equal? ch "E")))
+
+(define (daed:str-starts? s pre)
+  (if (or (not (string? s)) (not (string? pre)))
+    #f
+    (let ((n (string-length s))
+          (m (string-length pre)))
+      (if (< n m)
+        #f
+        (equal? (substring s 0 m) pre)))))
+
+(define (daed:si-scale suf)
+  (if (or (daed:str-starts? suf "Meg") (daed:str-starts? suf "meg"))
+    1e6
+    (if (or (daed:str-starts? suf "k") (daed:str-starts? suf "K"))
+      1e3
+      (if (daed:str-starts? suf "M")
+        1e6
+        (if (daed:str-starts? suf "m")
+          1e-3
+          (if (or (daed:str-starts? suf "u") (daed:str-starts? suf "µ"))
+            1e-6
+            (if (daed:str-starts? suf "n")
+              1e-9
+              (if (daed:str-starts? suf "p")
+                1e-12
+                1.0))))))))
+
+(define (daed:parse-value-str s)
+  (let ((n (string-length s))
+        (i 0)
+        (head "")
+        (tail "")
+        (num #f))
+    (while (lambda () (and (< i n) (daed:num-char? (substring s i (+ i 1)))))
+      (lambda () (set! i (+ i 1))))
+    (if (= i 0)
+      #f
+      (begin
+        (set! head (substring s 0 i))
+        (set! tail (if (< i n) (substring s i n) ""))
+        (set! num (string->number head))
+        (if (number? num)
+          (* num (daed:si-scale tail))
+          #f)))))
+
+; Map extractor node tokens to integer ids. GND/gnd/0 → 0.
+(define (daed:node-id x)
+  (if (number? x)
+    (inexact->exact (round x))
+    (if (not (string? x))
+      -1
+      (if (or (equal? x "0") (equal? x "GND") (equal? x "gnd")
+              (equal? x "Gnd") (equal? x "ground"))
+        0
+        (let ((n (string->number x)))
+          (if (number? n)
+            (inexact->exact (round n))
+            -1))))))
+
+(define (daed:ir-new title)
+  (let ((h (hash)))
+    (hash-set! h "schema" daed:ir-schema-id)
+    (hash-set! h "title" (if (string? title) title "ckt"))
+    (hash-set! h "gnd" 0)
+    (hash-set! h "comps" '())
+    (hash-set! h "notes" "")
+    h))
+
+(define (daed:ir-comp type name n1 n2 value)
+  (let ((h (hash)))
+    (hash-set! h "type" type)
+    (hash-set! h "name" name)
+    (hash-set! h "n1" n1)
+    (hash-set! h "n2" n2)
+    (hash-set! h "value" value)
+    h))
+
+(define (daed:ir-comp3 type name n1 n2 n3 value)
+  (let ((h (daed:ir-comp type name n1 n2 value)))
+    (hash-set! h "n3" n3)
+    h))
+
+(define (daed:ir-add-comp! ir c)
+  (hash-set! ir "comps" (cons c (hash-ref ir "comps" '())))
+  ir)
+
+(define (daed:ir-title ir)
+  (hash-ref ir "title" "ckt"))
+
+(define (daed:ir-gnd ir)
+  (daed:node-id (hash-ref ir "gnd" 0)))
+
+(define (daed:ir-comps ir)
+  (hash-ref ir "comps" '()))
+
+(define (daed:ir-known-type? ty)
+  (or (equal? ty "R") (equal? ty "C") (equal? ty "L")
+      (equal? ty "V") (equal? ty "I") (equal? ty "D") (equal? ty "Q")))
+
+(define (daed:ir-comp->comp c)
+  (let ((ty (hash-ref c "type" ""))
+        (nm (hash-ref c "name" ""))
+        (n1 (daed:node-id (hash-ref c "n1" 0)))
+        (n2 (daed:node-id (hash-ref c "n2" 0)))
+        (n3 (daed:node-id (hash-ref c "n3" 0)))
+        (val (daed:parse-value (hash-ref c "value" 0)))
+        (params (hash-ref c "params" #f)))
+    (if (not (number? val))
+      (set! val 0)
+      0)
+    (let ((out #f))
+      (cond
+        ((equal? ty "R") (set! out (daed:R nm n1 n2 val)))
+        ((equal? ty "C") (set! out (daed:C nm n1 n2 val)))
+        ((equal? ty "L") (set! out (daed:L nm n1 n2 val)))
+        ((equal? ty "V") (set! out (daed:V nm n1 n2 val)))
+        ((equal? ty "I") (set! out (daed:I nm n1 n2 val)))
+        ((equal? ty "D") (set! out (daed:D* nm n1 n2
+                                           (if (> val 0.0) val 1e-14)
+                                           1.0 0.026)))
+        ((equal? ty "Q") (set! out (daed:Q* nm n1 n2 n3
+                                           (if (> val 0.0) val 1e-15)
+                                           100.0 1.0 0.026)))
+        (else (set! out #f)))
+      (if (and out params)
+        (begin
+          (if (hash-ref params "n" #f)
+            (hash-set! out "n" (hash-ref params "n" 1.0))
+            0)
+          (if (hash-ref params "vt" #f)
+            (hash-set! out "vt" (hash-ref params "vt" 0.026))
+            0)
+          (if (hash-ref params "bf" #f)
+            (hash-set! out "bf" (hash-ref params "bf" 100.0))
+            0)
+          (if (hash-ref params "br" #f)
+            (hash-set! out "br" (hash-ref params "br" 1.0))
+            0)
+          (if (hash-ref params "gmin" #f)
+            (hash-set! out "gmin" (hash-ref params "gmin" 1e-12))
+            0)
+          (if (hash-ref params "Is" #f)
+            (hash-set! out "value" (hash-ref params "Is" val))
+            0))
+        0)
+      out)))
+
+; Reverse comps so ir-add-comp! cons-order still converts in source order
+; when the caller used ir-add-comp!. List literals stay as written.
+(define (daed:ir-comp-list ir)
+  (hash-ref ir "comps" '()))
+
+(define (daed:ir->circuit ir)
+  (let ((title (daed:ir-title ir))
+        (acc '()))
+    (let loop ((cs (daed:ir-comp-list ir)))
+      (if (null? cs)
+        (daed:circuit title (reverse acc))
+        (begin
+          (let ((c (daed:ir-comp->comp (car cs))))
+            (if c
+              (set! acc (cons c acc))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:circuit->ir ckt)
+  (let ((ir (daed:ir-new (daed:ckt-name ckt)))
+        (acc '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        (begin
+          (hash-set! ir "comps" (reverse acc))
+          ir)
+        (begin
+          (let ((c (car cs)))
+            (let ((h (daed:ir-comp (daed:comp-type c)
+                                   (daed:comp-name c)
+                                   (daed:comp-n1 c)
+                                   (daed:comp-n2 c)
+                                   (daed:comp-value c))))
+              (if (equal? (daed:comp-type c) "Q")
+                (hash-set! h "n3" (daed:comp-n3 c))
+                0)
+              (set! acc (cons h acc))))
+          (loop (cdr cs)))))))
+
+; ── Canonical examples (hand-written IR) ──
+
+(define (daed:ir-ex-divider)
+  (let ((ir (daed:ir-new "divider")))
+    (hash-set! ir "comps"
+      (list (daed:ir-comp "V" "vin" 1 0 5.0)
+            (daed:ir-comp "R" "r1" 1 2 "1k")
+            (daed:ir-comp "R" "r2" 2 0 "2k")))
+    ir))
+
+(define (daed:ir-ex-rc)
+  (let ((ir (daed:ir-new "rc-lp")))
+    (hash-set! ir "comps"
+      (list (daed:ir-comp "V" "vin" 1 0 5.0)
+            (daed:ir-comp "R" "r1" 1 2 "1kΩ")
+            (daed:ir-comp "C" "c1" 2 0 "1uF")))
+    ir))
+
+(define (daed:ir-ex-series-r)
+  (let ((ir (daed:ir-new "series-r")))
+    (hash-set! ir "comps"
+      (list (daed:ir-comp "V" "vin" 1 0 5.0)
+            (daed:ir-comp "R" "r1" 1 0 1e3)))
+    ir))
+
+(define (daed:ir-ex-norton)
+  (let ((ir (daed:ir-new "norton")))
+    (hash-set! ir "comps"
+      (list (daed:ir-comp "I" "iin" 0 1 0.001)
+            (daed:ir-comp "R" "r1" 1 0 "2k")))
+    ir))
+
+(define (daed:ir-ex-diode)
+  (let ((ir (daed:ir-new "diode-fwd")))
+    (hash-set! ir "comps"
+      (list (daed:ir-comp "V" "vin" 1 0 5.0)
+            (daed:ir-comp "R" "r1" 1 2 "1k")
+            (daed:ir-comp "D" "d1" 2 0 1e-14)))
+    ir))

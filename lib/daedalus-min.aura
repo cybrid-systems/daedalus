@@ -1,4 +1,4 @@
-; lib/daedalus-min.aura — Phase 5 facade (.op + .tran + mutate + agent + NR)
+; lib/daedalus-min.aura — Phase 5 facade + vision pipeline (issue #6)
 ;
 ; (require "daedalus-min" all:)
 ; Form order: export BEFORE require (#2766).
@@ -25,6 +25,7 @@
         daed:comp-type daed:comp-name daed:comp-n1 daed:comp-n2 daed:comp-n3
         daed:comp-nc daed:comp-nb daed:comp-ne
         daed:comp-value daed:comp-set-value!
+        daed:comp-set-n1! daed:comp-set-n2! daed:comp-set-n3!
         daed:comp-param daed:comp-set-param!
         daed:has-nonlinear?
         daed:max-node daed:count-type daed:node-index
@@ -76,7 +77,29 @@
         daed:string-has? daed:num->str
         daed:circuit->svg daed:circuit->html daed:html-after-op
         daed:apply-viz-edits!
-        daed:viz-edit-ok? daed:viz-edit-applied daed:viz-edit-reason)
+        daed:viz-edit-ok? daed:viz-edit-applied daed:viz-edit-reason
+        ; IR / validate / repair / vision (issue #6)
+        daed:ir-version daed:ir-schema-id
+        daed:parse-value daed:node-id
+        daed:ir-new daed:ir-comp daed:ir-comp3 daed:ir-add-comp!
+        daed:ir-title daed:ir-gnd daed:ir-comps
+        daed:ir->circuit daed:circuit->ir
+        daed:ir-ex-divider daed:ir-ex-rc daed:ir-ex-series-r
+        daed:ir-ex-norton daed:ir-ex-diode
+        daed:validate-version
+        daed:issue daed:issue-error? daed:issues-errors daed:issues-error-count
+        daed:validate-ir daed:validate-ckt
+        daed:repair-version
+        daed:rewrite-node!
+        daed:repair-ensure-gnd! daed:repair-unshort-v! daed:repair-fix-value!
+        daed:repair-flip-v! daed:repair-flip-d!
+        daed:repair-once! daed:repair-ckt!
+        daed:repair-ok? daed:repair-steps daed:repair-trace daed:repair-issues
+        daed:vision-version
+        daed:fixture-register! daed:fixture-lookup daed:install-builtin-fixtures!
+        daed:basename daed:from-ir daed:from-image
+        daed:pipe-ok? daed:pipe-circuit daed:pipe-sim daed:pipe-html
+        daed:pipe-trace daed:pipe-reason)
 
 (require "netlist" all:)
 (require "stamp" all:)
@@ -87,9 +110,15 @@
 (require "mutate-circuit" all:)
 (require "agent" all:)
 (require "viz" all:)
+(require "ir" all:)
+(require "validate" all:)
+(require "repair" all:)
+(require "vision" all:)
 
-; 5 = Phase 5 nonlinear devices + Newton-Raphson (issue #2)
-(define daed:min-version 5)
+; 6 = issue #6 vision → netlist → repair → simulate
+(define daed:min-version 6)
+
+(daed:install-builtin-fixtures!)
 
 ; ── Alist helper ──
 (define (daed:alist-ref key lst default)

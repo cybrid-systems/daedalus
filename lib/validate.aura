@@ -1,0 +1,342 @@
+; lib/validate.aura — Static topology / semantic checks (issue #6 / #9)
+;
+; (require "validate" all:)
+;
+; Pure Aura. Issues are hashes the repair agent can consume:
+;   severity  "error" | "warn"
+;   code      machine id
+;   loc       component name or "circuit"
+;   msg       human text
+;   fix       suggested operator name (or "")
+
+(export daed:validate-version
+        daed:issue
+        daed:issue-error?
+        daed:issues-errors
+        daed:issues-error-count
+        daed:validate-ir
+        daed:validate-ckt)
+
+(require "netlist" all:)
+(require "ir" all:)
+(require "mutate-circuit" all:)
+
+(define daed:validate-version 1)
+
+(define (daed:issue sev code loc msg fix)
+  (let ((h (hash)))
+    (hash-set! h "severity" sev)
+    (hash-set! h "code" code)
+    (hash-set! h "loc" loc)
+    (hash-set! h "msg" msg)
+    (hash-set! h "fix" fix)
+    h))
+
+(define (daed:issue-error? iss)
+  (equal? (hash-ref iss "severity" "") "error"))
+
+(define (daed:issues-error-count issues)
+  (let ((n 0))
+    (let loop ((xs issues))
+      (if (null? xs)
+        n
+        (begin
+          (if (daed:issue-error? (car xs))
+            (set! n (+ n 1))
+            0)
+          (loop (cdr xs)))))))
+
+(define (daed:issues-errors issues)
+  (let ((acc '()))
+    (let loop ((xs issues))
+      (if (null? xs)
+        (reverse acc)
+        (begin
+          (if (daed:issue-error? (car xs))
+            (set! acc (cons (car xs) acc))
+            0)
+          (loop (cdr xs)))))))
+
+(define (daed:mem-name? name xs)
+  (let loop ((ys xs))
+    (if (null? ys)
+      #f
+      (if (equal? (car ys) name)
+        #t
+        (loop (cdr ys))))))
+
+(define (daed:mem-num? n xs)
+  (let loop ((ys xs))
+    (if (null? ys)
+      #f
+      (if (equal? (car ys) n)
+        #t
+        (loop (cdr ys))))))
+
+(define (daed:type-ok? ty)
+  (or (equal? ty "R") (equal? ty "C") (equal? ty "L")
+      (equal? ty "V") (equal? ty "I") (equal? ty "D") (equal? ty "Q")))
+
+(define (daed:passive? ty)
+  (or (equal? ty "R") (equal? ty "C") (equal? ty "L")))
+
+; ── IR validation ──
+
+(define (daed:validate-ir ir)
+  (if (not ir)
+    (list (daed:issue "error" "no-ir" "circuit" "missing IR" ""))
+    (let ((acc '())
+          (seen '())
+          (has-gnd #f)
+          (schema (hash-ref ir "schema" "")))
+      (if (and (string? schema)
+               (not (equal? schema ""))
+               (not (equal? schema daed:ir-schema-id)))
+        (set! acc (cons (daed:issue "warn" "schema" "circuit"
+                                    "unexpected schema id" "")
+                        acc))
+        0)
+      (let ((cs (daed:ir-comps ir)))
+        (if (null? cs)
+          (set! acc (cons (daed:issue "error" "empty" "circuit"
+                                      "no components" "")
+                          acc))
+          0)
+        (let loop ((xs cs))
+          (if (null? xs)
+            0
+            (begin
+              (let ((c (car xs)))
+                (let ((ty (hash-ref c "type" ""))
+                      (nm (hash-ref c "name" ""))
+                      (n1 (daed:node-id (hash-ref c "n1" -1)))
+                      (n2 (daed:node-id (hash-ref c "n2" -1)))
+                      (val (daed:parse-value (hash-ref c "value" #f))))
+                  (if (or (not (string? nm)) (equal? nm ""))
+                    (set! acc (cons (daed:issue "error" "bad-name" "circuit"
+                                                "component missing name" "")
+                                    acc))
+                    0)
+                  (if (and (string? nm) (daed:mem-name? nm seen))
+                    (set! acc (cons (daed:issue "error" "dup-name" nm
+                                                "duplicate component name" "rename")
+                                    acc))
+                    0)
+                  (if (string? nm)
+                    (set! seen (cons nm seen))
+                    0)
+                  (if (not (daed:type-ok? ty))
+                    (set! acc (cons (daed:issue "error" "bad-type" nm
+                                                "unknown component type" "")
+                                    acc))
+                    0)
+                  (if (or (= n1 0) (= n2 0)
+                          (and (equal? ty "Q")
+                               (= (daed:node-id (hash-ref c "n3" -1)) 0)))
+                    (set! has-gnd #t)
+                    0)
+                  (if (and (daed:passive? ty) (or (not (number? val)) (<= val 0.0)))
+                    (set! acc (cons (daed:issue "error" "bad-value" nm
+                                                "R/C/L must be > 0" "fix-value")
+                                    acc))
+                    0)
+                  (if (and (or (equal? ty "D") (equal? ty "Q"))
+                           (or (not (number? val)) (<= val 0.0)))
+                    (set! acc (cons (daed:issue "warn" "bad-is" nm
+                                                "Is should be > 0" "fix-value")
+                                    acc))
+                    0)
+                  (if (and (or (equal? ty "V") (equal? ty "I"))
+                           (not (number? val)))
+                    (set! acc (cons (daed:issue "error" "bad-value" nm
+                                                "source value missing" "fix-value")
+                                    acc))
+                    0)
+                  (if (and (equal? ty "V") (= n1 n2))
+                    (set! acc (cons (daed:issue "error" "v-short" nm
+                                                "voltage source is shorted" "unshort-v")
+                                    acc))
+                    0)
+                  (if (and (equal? ty "I") (= n1 n2))
+                    (set! acc (cons (daed:issue "warn" "i-open" nm
+                                                "current source terminals coincide" "")
+                                    acc))
+                    0)
+                  (if (and (equal? ty "D") (= n1 n2))
+                    (set! acc (cons (daed:issue "error" "d-short" nm
+                                                "diode terminals coincide" "flip-d")
+                                    acc))
+                    0)))
+              (loop (cdr xs)))))
+        (if (not has-gnd)
+          (set! acc (cons (daed:issue "error" "no-gnd" "circuit"
+                                      "no terminal on node 0 (GND)" "ensure-gnd")
+                          acc))
+          0))
+      (reverse acc))))
+
+; ── Circuit validation (plus connectivity) ──
+
+(define (daed:ckt-node-list ckt)
+  (let ((acc '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        acc
+        (begin
+          (let ((c (car cs)))
+            (let ((n1 (daed:comp-n1 c))
+                  (n2 (daed:comp-n2 c))
+                  (n3 (daed:comp-n3 c)))
+              (if (and (number? n1) (not (daed:mem-num? n1 acc)))
+                (set! acc (cons n1 acc))
+                0)
+              (if (and (number? n2) (not (daed:mem-num? n2 acc)))
+                (set! acc (cons n2 acc))
+                0)
+              (if (and (equal? (daed:comp-type c) "Q")
+                       (number? n3) (not (= n3 0))
+                       (not (daed:mem-num? n3 acc)))
+                (set! acc (cons n3 acc))
+                0)))
+          (loop (cdr cs)))))))
+
+; Undirected adjacency as list of (node . neighbors)
+(define (daed:adj-get adj node)
+  (let loop ((xs adj))
+    (if (null? xs)
+      '()
+      (if (equal? (car (car xs)) node)
+        (cdr (car xs))
+        (loop (cdr xs))))))
+
+(define (daed:adj-add adj a b)
+  (if (= a b)
+    adj
+    (let ((na (cons b (daed:adj-get adj a)))
+          (nb (cons a (daed:adj-get adj b)))
+          (out '())
+          (seen-a #f)
+          (seen-b #f))
+      (let loop ((xs adj))
+        (if (null? xs)
+          (begin
+            (if (not seen-a) (set! out (cons (cons a na) out)) 0)
+            (if (not seen-b) (set! out (cons (cons b nb) out)) 0)
+            out)
+          (begin
+            (let ((k (car (car xs))))
+              (if (equal? k a)
+                (begin (set! seen-a #t) (set! out (cons (cons a na) out)))
+                (if (equal? k b)
+                  (begin (set! seen-b #t) (set! out (cons (cons b nb) out)))
+                  (set! out (cons (car xs) out)))))
+            (loop (cdr xs))))))))
+
+(define (daed:ckt-adj ckt)
+  (let ((adj '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        adj
+        (begin
+          (let ((c (car cs)))
+            (set! adj (daed:adj-add adj (daed:comp-n1 c) (daed:comp-n2 c)))
+            (if (equal? (daed:comp-type c) "Q")
+              (begin
+                (set! adj (daed:adj-add adj (daed:comp-n1 c) (daed:comp-n3 c)))
+                (set! adj (daed:adj-add adj (daed:comp-n2 c) (daed:comp-n3 c))))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:reachable-from adj start)
+  (let ((seen (list start))
+        (stack (list start)))
+    (while (lambda () (not (null? stack)))
+      (lambda ()
+        (let ((n (car stack)))
+          (set! stack (cdr stack))
+          (let loop ((ns (daed:adj-get adj n)))
+            (if (null? ns)
+              0
+              (begin
+                (if (not (daed:mem-num? (car ns) seen))
+                  (begin
+                    (set! seen (cons (car ns) seen))
+                    (set! stack (cons (car ns) stack)))
+                  0)
+                (loop (cdr ns))))))))
+    seen))
+
+(define (daed:validate-ckt ckt)
+  (if (not ckt)
+    (list (daed:issue "error" "no-ckt" "circuit" "missing circuit" ""))
+    (let ((acc '())
+          (seen '())
+          (has-gnd #f)
+          (cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        (set! acc (cons (daed:issue "error" "empty" "circuit"
+                                    "no components" "")
+                        acc))
+        0)
+      (if (not (daed:topology-ok? ckt))
+        (set! acc (cons (daed:issue "error" "topology" "circuit"
+                                    "topology-ok? failed" "fix-value")
+                        acc))
+        0)
+      (let loop ((xs cs))
+        (if (null? xs)
+          0
+          (begin
+            (let ((c (car xs)))
+              (let ((ty (daed:comp-type c))
+                    (nm (daed:comp-name c))
+                    (n1 (daed:comp-n1 c))
+                    (n2 (daed:comp-n2 c))
+                    (val (daed:comp-value c)))
+                (if (daed:mem-name? nm seen)
+                  (set! acc (cons (daed:issue "error" "dup-name" nm
+                                              "duplicate component name" "rename")
+                                  acc))
+                  0)
+                (set! seen (cons nm seen))
+                (if (not (daed:type-ok? ty))
+                  (set! acc (cons (daed:issue "error" "bad-type" nm
+                                              "unknown component type" "")
+                                  acc))
+                  0)
+                (if (or (equal? n1 0) (equal? n2 0)
+                        (and (equal? ty "Q") (equal? (daed:comp-n3 c) 0)))
+                  (set! has-gnd #t)
+                  0)
+                (if (and (daed:passive? ty) (or (not (number? val)) (<= val 0.0)))
+                  (set! acc (cons (daed:issue "error" "bad-value" nm
+                                              "R/C/L must be > 0" "fix-value")
+                                  acc))
+                  0)
+                (if (and (equal? ty "V") (= n1 n2))
+                  (set! acc (cons (daed:issue "error" "v-short" nm
+                                              "voltage source is shorted" "unshort-v")
+                                  acc))
+                  0)))
+            (loop (cdr xs)))))
+      (if (not has-gnd)
+        (set! acc (cons (daed:issue "error" "no-gnd" "circuit"
+                                    "no terminal on node 0 (GND)" "ensure-gnd")
+                        acc))
+        0)
+      (if has-gnd
+        (let ((nodes (daed:ckt-node-list ckt))
+              (reach (daed:reachable-from (daed:ckt-adj ckt) 0)))
+          (let loop ((ns nodes))
+            (if (null? ns)
+              0
+              (begin
+                (if (not (daed:mem-num? (car ns) reach))
+                  (set! acc (cons (daed:issue "error" "floating" "circuit"
+                                              "node not connected to GND"
+                                              "ensure-gnd")
+                                  acc))
+                  0)
+                (loop (cdr ns))))))
+        0)
+      (reverse acc))))

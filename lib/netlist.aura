@@ -29,6 +29,9 @@
         daed:comp-ne
         daed:comp-value
         daed:comp-set-value!
+        daed:comp-set-n1!
+        daed:comp-set-n2!
+        daed:comp-set-n3!
         daed:comp-param
         daed:comp-set-param!
         daed:has-nonlinear?
@@ -146,6 +149,18 @@
 
 (define (daed:comp-set-value! c value)
   (hash-set! c "value" value)
+  c)
+
+(define (daed:comp-set-n1! c n)
+  (hash-set! c "n1" n)
+  c)
+
+(define (daed:comp-set-n2! c n)
+  (hash-set! c "n2" n)
+  c)
+
+(define (daed:comp-set-n3! c n)
+  (hash-set! c "n3" n)
   c)
 
 (define (daed:comp-param c key default)

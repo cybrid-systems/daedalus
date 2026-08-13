@@ -1,8 +1,8 @@
 # Denseness Report — Daedalus
 
 **Date:** 2026-08-13  
-**Status:** **Phase 5 nonlinear + NR** — probes **00–03, 05–09** PASS; pure-Aura MNA + BE + mutate + O→D→M→V→R + Shockley/Ebers-Moll NR, core \(E=0\).  
-**Judgment:** **strong on P0 slice + educational nonlinear** — linear DC/tran, parameter mutate, agent auto-tune, and diode/BJT Newton denseness hold on the evolvable core. Full multi-agent / topology-search / commercial models remain out of scope.
+**Status:** **Phase 5 + vision pipeline** — probes **00–03, 05–10** PASS; core \(E=0\). Live VLM extract is an optional logged host escape.  
+**Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, and IR/repair denseness hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
 **Prior spans:** Aether / Hephaestus / Hermes / Prometheus denseness reports (siblings)
@@ -42,6 +42,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 | [07](../examples/07-diode-op/) | Shockley + NR `.op` | **PASS** | 0 | 0 |
 | [08](../examples/08-bjt-ce/) | Ebers-Moll CE / switch | **PASS** | 0 | 0 |
 | [09](../examples/09-diode-clamp-tran/) | BE+NR nonlinear `.tran` | **PASS** | 0 | 0 |
+| [10](../examples/10-vision-pipeline/) | IR → repair → simulate (issue #6) | **PASS** | 0 | 0 |
 
 ### Phase 1–2 narrative
 
@@ -65,6 +66,12 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - Probe 07: forward \(V_d \approx 0.7\,\mathrm{V}\), reverse \(I \approx 0\), mutate \(I_s\) + rollback.
 - Probe 08: NPN switch on/off, CE mid-rail bias, inverting small-signal polarity, mutate \(\beta_F\).
 - Probe 09: RC + shunt diode clamps a step; BJT inverter `.tran` settles into saturation.
+
+### Issue #6 narrative (vision pipeline)
+
+- `daedalus-ir/1` + `ir->circuit` / `circuit->ir`; static validator; rule-based repair with snapshot/rollback.
+- `from-image` is fixture-first. Live VLM (`scripts/extract-ir.py`) is a logged host escape, not on the probe path.
+- Probe 10: 5 clean IRs simulate; ≥10 broken IRs diagnosed; ≥7/10 seeded repairs recover; fixture `from-image`; escapes=0.
 
 ---
 

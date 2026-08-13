@@ -1,0 +1,288 @@
+; lib/repair.aura — Simulation-feedback auto-repair (issue #6 / #10)
+;
+; (require "repair" all:)
+;
+; Rule-based operators + snapshot/rollback. Pure Aura.
+; Optional VLM critique is a later escape; not required on this path.
+
+(export daed:repair-version
+        daed:rewrite-node!
+        daed:repair-ensure-gnd!
+        daed:repair-unshort-v!
+        daed:repair-fix-value!
+        daed:repair-flip-v!
+        daed:repair-flip-d!
+        daed:repair-once!
+        daed:repair-ckt!
+        daed:repair-ok?
+        daed:repair-steps
+        daed:repair-trace
+        daed:repair-issues)
+
+(require "netlist" all:)
+(require "mutate-circuit" all:)
+(require "validate" all:)
+(require "solve" all:)
+
+(define daed:repair-version 1)
+
+(define daed:default-r 1e3)
+(define daed:default-c 1e-6)
+(define daed:default-l 1e-3)
+
+(define (daed:rewrite-node! ckt from to)
+  (if (or (not (number? from)) (not (number? to)) (= from to))
+    #f
+    (begin
+      (let loop ((cs (daed:ckt-comps ckt)))
+        (if (null? cs)
+          #t
+          (begin
+            (let ((c (car cs)))
+              (if (equal? (daed:comp-n1 c) from)
+                (daed:comp-set-n1! c to)
+                0)
+              (if (equal? (daed:comp-n2 c) from)
+                (daed:comp-set-n2! c to)
+                0)
+              (if (equal? (daed:comp-n3 c) from)
+                (daed:comp-set-n3! c to)
+                0))
+            (loop (cdr cs))))))))
+
+; If nothing touches node 0, remap a V-source return (n2) to 0.
+; Else remap the highest node id (often a mislabelled GND).
+(define (daed:repair-ensure-gnd! ckt)
+  (let ((touches #f)
+        (v-ret #f))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        0
+        (begin
+          (let ((c (car cs)))
+            (if (or (equal? (daed:comp-n1 c) 0)
+                    (equal? (daed:comp-n2 c) 0)
+                    (and (equal? (daed:comp-type c) "Q")
+                         (equal? (daed:comp-n3 c) 0)))
+              (set! touches #t)
+              0)
+            (if (and (not v-ret) (equal? (daed:comp-type c) "V"))
+              (set! v-ret (daed:comp-n2 c))
+              0))
+          (loop (cdr cs)))))
+    (if touches
+      #f
+      (let ((src (if (and (number? v-ret) (not (= v-ret 0)))
+                   v-ret
+                   (daed:max-node (daed:ckt-comps ckt)))))
+        (if (or (not (number? src)) (= src 0))
+          #f
+          (daed:rewrite-node! ckt src 0))))))
+
+(define (daed:repair-unshort-v! ckt)
+  (let ((did #f))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        did
+        (begin
+          (let ((c (car cs)))
+            (if (and (equal? (daed:comp-type c) "V")
+                     (equal? (daed:comp-n1 c) (daed:comp-n2 c)))
+              (begin
+                (if (equal? (daed:comp-n2 c) 0)
+                  (daed:comp-set-n1! c 1)
+                  (daed:comp-set-n2! c 0))
+                (set! did #t))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:default-for-type ty)
+  (if (equal? ty "C")
+    daed:default-c
+    (if (equal? ty "L")
+      daed:default-l
+      daed:default-r)))
+
+(define (daed:repair-fix-value! ckt)
+  (let ((did #f))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        did
+        (begin
+          (let ((c (car cs)))
+            (let ((ty (daed:comp-type c))
+                  (val (daed:comp-value c)))
+              (if (and (or (equal? ty "R") (equal? ty "C") (equal? ty "L"))
+                       (or (not (number? val)) (<= val 0.0)))
+                (begin
+                  (daed:comp-set-value! c (daed:default-for-type ty))
+                  (set! did #t))
+                0)
+              (if (and (or (equal? ty "D") (equal? ty "Q"))
+                       (or (not (number? val)) (<= val 0.0)))
+                (begin
+                  (daed:comp-set-value! c (if (equal? ty "Q") 1e-15 1e-14))
+                  (set! did #t))
+                0)))
+          (loop (cdr cs)))))))
+
+(define (daed:repair-flip-v! ckt)
+  (let ((did #f))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        did
+        (begin
+          (let ((c (car cs)))
+            (if (and (equal? (daed:comp-type c) "V")
+                     (not (equal? (daed:comp-n2 c) 0))
+                     (equal? (daed:comp-n1 c) 0))
+              (begin
+                (let ((a (daed:comp-n1 c))
+                      (b (daed:comp-n2 c)))
+                  (daed:comp-set-n1! c b)
+                  (daed:comp-set-n2! c a)
+                  (set! did #t)))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:repair-flip-d! ckt)
+  (let ((did #f))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        did
+        (begin
+          (let ((c (car cs)))
+            (if (and (equal? (daed:comp-type c) "D")
+                     (equal? (daed:comp-n1 c) (daed:comp-n2 c)))
+              (begin
+                (if (equal? (daed:comp-n2 c) 0)
+                  (daed:comp-set-n1! c 1)
+                  (daed:comp-set-n2! c 0))
+                (set! did #t))
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:trace-entry op applied reason)
+  (let ((h (hash)))
+    (hash-set! h "op" op)
+    (hash-set! h "applied" applied)
+    (hash-set! h "reason" reason)
+    h))
+
+; Pick first applicable operator from the issue list.
+(define (daed:repair-once! ckt issues)
+  (let ((done #f)
+        (entry #f))
+    (let loop ((xs issues))
+      (if (or done (null? xs))
+        (if entry entry (daed:trace-entry "none" #f "no-op"))
+        (let ((fix (hash-ref (car xs) "fix" "")))
+          (cond
+            ((equal? fix "ensure-gnd")
+             (begin
+               (set! done #t)
+               (set! entry (daed:trace-entry "ensure-gnd"
+                                             (daed:repair-ensure-gnd! ckt)
+                                             "no-gnd"))))
+            ((equal? fix "unshort-v")
+             (begin
+               (set! done #t)
+               (set! entry (daed:trace-entry "unshort-v"
+                                             (daed:repair-unshort-v! ckt)
+                                             "v-short"))))
+            ((equal? fix "fix-value")
+             (begin
+               (set! done #t)
+               (set! entry (daed:trace-entry "fix-value"
+                                             (daed:repair-fix-value! ckt)
+                                             "bad-value"))))
+            ((equal? fix "flip-d")
+             (begin
+               (set! done #t)
+               (set! entry (daed:trace-entry "flip-d"
+                                             (daed:repair-flip-d! ckt)
+                                             "d-short"))))
+            (else (loop (cdr xs)))))))))
+
+; Improve = fewer errors, or same errors but .op now succeeds.
+(define (daed:repair-score ckt)
+  (let ((n (daed:issues-error-count (daed:validate-ckt ckt))))
+    (if (> n 0)
+      n
+      (let ((op (daed:simulate-op ckt)))
+        (if (daed:op-ok? op) 0 1)))))
+
+(define (daed:repair-ckt! ckt budget)
+  (let ((res (hash))
+        (trace '())
+        (steps 0)
+        (lim (if (and (number? budget) (> budget 0)) budget 8))
+        (going #t))
+    (hash-set! res "ok" #f)
+    (while (lambda () (and going (< steps lim)))
+      (lambda ()
+        (let ((issues (daed:validate-ckt ckt)))
+          (let ((nerr (daed:issues-error-count issues)))
+            (if (<= nerr 0)
+              (let ((op (daed:simulate-op ckt)))
+                (if (daed:op-ok? op)
+                  (begin
+                    (set! going #f)
+                    (hash-set! res "ok" #t))
+                  (begin
+                    ; sim failed with clean static checks — try polarity
+                    (let ((snap (daed:circuit-snapshot ckt)))
+                      (let ((did (daed:repair-flip-v! ckt)))
+                        (set! steps (+ steps 1))
+                        (if (and did (daed:op-ok? (daed:simulate-op ckt)))
+                          (begin
+                            (set! trace (cons (daed:trace-entry "flip-v" #t "sim")
+                                              trace))
+                            (set! going #f)
+                            (hash-set! res "ok" #t))
+                          (begin
+                            (daed:restore-circuit! ckt snap)
+                            (set! trace (cons (daed:trace-entry "flip-v" #f "no-help")
+                                              trace))
+                            (set! going #f))))))))
+              (let ((snap (daed:circuit-snapshot ckt))
+                    (before nerr))
+                (let ((ent (daed:repair-once! ckt issues)))
+                  (set! steps (+ steps 1))
+                  (if (not (hash-ref ent "applied" #f))
+                    (begin
+                      (daed:restore-circuit! ckt snap)
+                      (set! trace (cons ent trace))
+                      (set! going #f))
+                    (let ((after (daed:issues-error-count (daed:validate-ckt ckt))))
+                      (if (<= after before)
+                        (set! trace (cons ent trace))
+                        (begin
+                          (daed:restore-circuit! ckt snap)
+                          (hash-set! ent "applied" #f)
+                          (hash-set! ent "reason" "worsened")
+                          (set! trace (cons ent trace))
+                          (set! going #f))))))))))))
+    ; final sim if static-clean
+    (if (not (hash-ref res "ok" #f))
+      (let ((iss (daed:validate-ckt ckt)))
+        (if (<= (daed:issues-error-count iss) 0)
+          (hash-set! res "ok" (daed:op-ok? (daed:simulate-op ckt)))
+          0))
+      0)
+    (hash-set! res "steps" steps)
+    (hash-set! res "trace" (reverse trace))
+    (hash-set! res "issues" (daed:validate-ckt ckt))
+    res))
+
+(define (daed:repair-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:repair-steps r)
+  (hash-ref r "steps" 0))
+
+(define (daed:repair-trace r)
+  (hash-ref r "trace" '()))
+
+(define (daed:repair-issues r)
+  (hash-ref r "issues" '()))

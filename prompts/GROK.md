@@ -42,7 +42,9 @@ Primary objects under test:
 - Probe `07-diode-op` — Shockley + NR `.op`, escapes=0 (issue #2)
 - Probe `08-bjt-ce` — Ebers-Moll switch + CE `.op`, escapes=0 (issue #2)
 - Probe `09-diode-clamp-tran` — BE+NR nonlinear `.tran`, escapes=0 (issue #2)
+- Probe `10-vision-pipeline` — IR → validate → repair → fixture `from-image`, escapes=0 (issue #6)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
+- Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
 
 **Post-P1:** topology mutate, multi-agent compose, PNP / astable coverage, richer viz layout (as needed).
 

@@ -14,6 +14,10 @@
 | `mutate-circuit.aura` | 3–5 | Safe parameter mutate + circuit snapshot (incl. D/Q params) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
+| `ir.aura` | issue #6 | `daedalus-ir/1` + unit parse + `IR → circuit` |
+| `validate.aura` | issue #6 | Static topology / semantic issues |
+| `repair.aura` | issue #6 | Snapshot-guarded repair operators + loop |
+| `vision.aura` | issue #6 | `from-ir` / `from-image` (fixture; VLM is an escape) |
 
 ```scheme
 (require "daedalus-min" all:)
@@ -44,6 +48,11 @@
 (define dop (daed:simulate-op dckt))
 (daed:v dop 2)   ; ≈ 0.7 V
 (daed:op-iters dop)
+
+;; Issue #6: IR → repair → simulate (no live VLM)
+(define pipe (daed:from-ir (daed:ir-ex-divider) 8))
+(daed:pipe-ok? pipe)
+(daed:from-image "fixtures/divider.svg")
 ```
 
 Host resolution: `scripts/run-aura.sh` sets `AURA_PATH` to `../aura-grok/lib:./lib`.

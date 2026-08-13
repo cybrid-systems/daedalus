@@ -1,0 +1,309 @@
+; examples/10-vision-pipeline/main.aura
+;
+; Issue #6 denseness probe — IR → validate → repair → simulate.
+; Offline: fixtures, no live VLM (escape count 0 on the core path).
+;
+; Axes: IR schema, static checks, O→D→M→V→R repair, from-image fixture
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/10-vision-pipeline/main.aura
+
+(require "daedalus-min" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 10-vision-pipeline: IR + repair + from-image ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " ir=")
+(display daed:ir-version)
+(display " validate=")
+(display daed:validate-version)
+(display " repair=")
+(display daed:repair-version)
+(display " vision=")
+(display daed:vision-version)
+(newline)
+
+; ── 1. Unit parse ──
+(define p-k (daed:check-approx (daed:parse-value "1k") 1000.0 1e-9))
+(define p-uf (daed:check-approx (daed:parse-value "1uF") 1e-6 1e-15))
+(define p-num (daed:check-approx (daed:parse-value 2e3) 2000.0 1e-9))
+(define p-ohm (daed:check-approx (daed:parse-value "2kΩ") 2000.0 1e-9))
+(define gnd0 (daed:check-eq (daed:node-id "GND") 0))
+
+; ── 2. Five clean IRs convert + simulate ──
+(define r-div (daed:from-ir (daed:ir-ex-divider) 4))
+(daed:stats-bump! "sim_runs")
+(define div-ok (daed:check-true (daed:pipe-ok? r-div)))
+(define v2-div (daed:v (daed:pipe-sim r-div) 2))
+(define div-v (daed:check-approx v2-div (/ 10.0 3.0) 1e-3))
+
+(define r-rc (daed:from-ir (daed:ir-ex-rc) 4))
+(daed:stats-bump! "sim_runs")
+(define rc-ok (daed:check-true (daed:pipe-ok? r-rc)))
+(define v2-rc (daed:v (daed:pipe-sim r-rc) 2))
+; C open at .op → v2 = Vin
+(define rc-v (daed:check-approx v2-rc 5.0 1e-3))
+
+(define r-sr (daed:from-ir (daed:ir-ex-series-r) 4))
+(daed:stats-bump! "sim_runs")
+(define sr-ok (daed:check-true (daed:pipe-ok? r-sr)))
+
+(define r-nort (daed:from-ir (daed:ir-ex-norton) 4))
+(daed:stats-bump! "sim_runs")
+(define nort-ok (daed:check-true (daed:pipe-ok? r-nort)))
+(define v-nort (daed:v (daed:pipe-sim r-nort) 1))
+(define nort-v (daed:check-approx v-nort 2.0 1e-3))
+
+(define r-d (daed:from-ir (daed:ir-ex-diode) 8))
+(daed:stats-bump! "sim_runs")
+(define d-ok (daed:check-true (daed:pipe-ok? r-d)))
+(define vd (daed:v (daed:pipe-sim r-d) 2))
+(define d-v (daed:check-true (and (number? vd) (> vd 0.55) (< vd 0.85))))
+
+(display "clean divider v2=")
+(display v2-div)
+(display " rc.op v2=")
+(display v2-rc)
+(display " norton v1=")
+(display v-nort)
+(display " diode vd=")
+(display vd)
+(newline)
+
+; ── 3. Round-trip IR → ckt → IR → ckt ──
+(define ckt1 (daed:ir->circuit (daed:ir-ex-divider)))
+(define ir2 (daed:circuit->ir ckt1))
+(define ckt2 (daed:ir->circuit ir2))
+(define op-rt (daed:simulate-op ckt2))
+(daed:stats-bump! "sim_runs")
+(define rt-ok (daed:check-approx (daed:v op-rt 2) (/ 10.0 3.0) 1e-3))
+
+; ── 4. Good circuits validate clean ──
+(define v-div0 (daed:issues-error-count (daed:validate-ir (daed:ir-ex-divider))))
+(define v-ckt0 (daed:issues-error-count (daed:validate-ckt ckt1)))
+(define clean-ir (daed:check-eq v-div0 0))
+(define clean-ckt (daed:check-eq v-ckt0 0))
+
+; ── 5. Broken IRs diagnosed (10+) ──
+(define ir-empty (daed:ir-new "empty"))
+(define e-empty (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-empty)) 0)))
+
+(define ir-nognd (daed:ir-new "nognd"))
+(hash-set! ir-nognd "comps"
+  (list (daed:ir-comp "V" "vin" 1 3 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "R" "r2" 2 3 2e3)))
+(define iss-nognd (daed:validate-ir ir-nognd))
+(define e-nognd (daed:check-true (> (daed:issues-error-count iss-nognd) 0)))
+
+(define ir-r0 (daed:ir-new "r0"))
+(hash-set! ir-r0 "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "R" "r2" 2 0 0.0)))
+(define e-r0 (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-r0)) 0)))
+
+(define ir-rneg (daed:ir-new "rneg"))
+(hash-set! ir-rneg "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 0 -100.0)))
+(define e-rneg (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-rneg)) 0)))
+
+(define ir-vshort (daed:ir-new "vshort"))
+(hash-set! ir-vshort "comps"
+  (list (daed:ir-comp "V" "vin" 1 1 5.0)
+        (daed:ir-comp "R" "r1" 1 0 1e3)))
+(define e-vshort (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-vshort)) 0)))
+
+(define ir-c0 (daed:ir-new "c0"))
+(hash-set! ir-c0 "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "C" "c1" 2 0 0.0)))
+(define e-c0 (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-c0)) 0)))
+
+(define ir-dup (daed:ir-new "dup"))
+(hash-set! ir-dup "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 0 1e3)
+        (daed:ir-comp "R" "r1" 1 0 2e3)))
+(define e-dup (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-dup)) 0)))
+
+(define ir-badty (daed:ir-new "badty"))
+(hash-set! ir-badty "comps"
+  (list (daed:ir-comp "X" "x1" 1 0 1.0)))
+(define e-badty (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-badty)) 0)))
+
+(define ir-dshort (daed:ir-new "dshort"))
+(hash-set! ir-dshort "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "D" "d1" 2 2 1e-14)))
+(define e-dshort (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-dshort)) 0)))
+
+(define ir-noval (daed:ir-new "noval"))
+(hash-set! ir-noval "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 "??")
+        (daed:ir-comp "R" "r1" 1 0 1e3)))
+(define e-noval (daed:check-true
+  (> (daed:issues-error-count (daed:validate-ir ir-noval)) 0)))
+
+(display "validate-broken empty/nognd/r0/rneg/vshort/c0/dup/badty/dshort/noval")
+(newline)
+
+; ── 6. Repair seeded failures (majority must recover) ──
+(define (try-repair ir)
+  (let ((ckt (daed:ir->circuit ir)))
+    (let ((rep (daed:repair-ckt! ckt 8)))
+      (daed:stats-bump! "sim_runs")
+      (and (daed:repair-ok? rep)
+           (daed:op-ok? (daed:simulate-op ckt))))))
+
+(define rec-nognd (try-repair ir-nognd))
+(define rec-r0 (try-repair ir-r0))
+(define rec-rneg (try-repair ir-rneg))
+(define rec-vshort (try-repair ir-vshort))
+(define rec-c0 (try-repair ir-c0))
+(define rec-dshort (try-repair ir-dshort))
+
+(define ir-gnd5 (daed:ir-new "gnd5"))
+(hash-set! ir-gnd5 "comps"
+  (list (daed:ir-comp "V" "vin" 1 5 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "R" "r2" 2 5 2e3)))
+(define rec-gnd5 (try-repair ir-gnd5))
+
+(define ir-l0 (daed:ir-new "l0"))
+(hash-set! ir-l0 "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 2 1e3)
+        (daed:ir-comp "L" "l1" 2 0 0.0)))
+(define rec-l0 (try-repair ir-l0))
+
+(define ir-both (daed:ir-new "both"))
+(hash-set! ir-both "comps"
+  (list (daed:ir-comp "V" "vin" 1 0 5.0)
+        (daed:ir-comp "R" "r1" 1 2 0.0)
+        (daed:ir-comp "C" "c1" 2 0 0.0)))
+(define rec-both (try-repair ir-both))
+
+(define ir-okkeep (daed:ir-ex-divider))
+(define rec-okkeep (try-repair ir-okkeep))
+
+(define rec-n 0)
+(if rec-nognd (set! rec-n (+ rec-n 1)) 0)
+(if rec-r0 (set! rec-n (+ rec-n 1)) 0)
+(if rec-rneg (set! rec-n (+ rec-n 1)) 0)
+(if rec-vshort (set! rec-n (+ rec-n 1)) 0)
+(if rec-c0 (set! rec-n (+ rec-n 1)) 0)
+(if rec-dshort (set! rec-n (+ rec-n 1)) 0)
+(if rec-gnd5 (set! rec-n (+ rec-n 1)) 0)
+(if rec-l0 (set! rec-n (+ rec-n 1)) 0)
+(if rec-both (set! rec-n (+ rec-n 1)) 0)
+(if rec-okkeep (set! rec-n (+ rec-n 1)) 0)
+
+(display "repair recovered=")
+(display rec-n)
+(display "/10")
+(newline)
+(display "  nognd=")
+(display rec-nognd)
+(display " r0=")
+(display rec-r0)
+(display " rneg=")
+(display rec-rneg)
+(display " vshort=")
+(display rec-vshort)
+(display " c0=")
+(display rec-c0)
+(newline)
+(display "  dshort=")
+(display rec-dshort)
+(display " gnd5=")
+(display rec-gnd5)
+(display " l0=")
+(display rec-l0)
+(display " both=")
+(display rec-both)
+(display " keep=")
+(display rec-okkeep)
+(newline)
+
+(define rec-ok (daed:check-true (>= rec-n 7)))
+(define keep-ok (daed:check-true rec-okkeep))
+
+; ── 7. from-image fixture path ──
+(define img-div (daed:from-image "examples/10-vision-pipeline/fixtures/divider.svg"))
+(daed:stats-bump! "sim_runs")
+(define img-ok (daed:check-true (daed:pipe-ok? img-div)))
+(define img-v (daed:check-approx (daed:v (daed:pipe-sim img-div) 2) (/ 10.0 3.0) 1e-3))
+(define html (daed:pipe-html img-div))
+(define html-ok (daed:check-true (and (string? html) (daed:string-has? html "divider"))))
+(define w (write-file "examples/10-vision-pipeline/out/divider.html" html))
+
+(define img-miss (daed:from-image "no-such-schematic.png"))
+(define miss-ok (daed:check-true (not (daed:pipe-ok? img-miss))))
+(define miss-reason (daed:check-true (equal? (daed:pipe-reason img-miss) "no-fixture")))
+
+(display "from-image fixture ok=")
+(display (daed:pipe-ok? img-div))
+(display " missing=")
+(display (daed:pipe-reason img-miss))
+(newline)
+
+; ── 8. Existing linear circuit still validates ──
+(define lin
+  (daed:circuit "lin"
+    (list (daed:V "vin" 1 0 5.0)
+          (daed:R "r1" 1 2 1e3)
+          (daed:R "r2" 2 0 2e3))))
+(define lin-ok (daed:check-eq (daed:issues-error-count (daed:validate-ckt lin)) 0))
+
+(define escapes (daed:escape-count))
+(define esc-ok (daed:check-eq escapes 0))
+
+(display "stats: ")
+(write (daed:stats-alist))
+(newline)
+
+(define all-ok
+  (and p-k p-uf p-num p-ohm gnd0
+       div-ok div-v rc-ok rc-v sr-ok nort-ok nort-v d-ok d-v
+       rt-ok clean-ir clean-ckt
+       e-empty e-nognd e-r0 e-rneg e-vshort e-c0 e-dup e-badty e-dshort e-noval
+       rec-ok keep-ok
+       img-ok img-v html-ok miss-ok miss-reason
+       lin-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(if all-ok
+  (begin
+    (display "PASS: vision pipeline IR+validate+repair (escapes=0)")
+    (newline)
+    (display "RESULT pass example=10-vision-pipeline escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: vision pipeline denseness probe")
+    (newline)
+    (display "RESULT fail example=10-vision-pipeline")
+    (newline)
+    (display "  div-ok=")
+    (display div-ok)
+    (display " rec-n=")
+    (display rec-n)
+    (display " img-ok=")
+    (display img-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))

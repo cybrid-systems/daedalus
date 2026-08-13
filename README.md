@@ -221,6 +221,13 @@ Phase 5 nonlinear devices + Newton-Raphson ([issue #2](https://github.com/cybrid
 ./scripts/run-aura.sh examples/09-diode-clamp-tran/main.aura
 ```
 
+Vision → netlist → repair → simulate ([issue #6](https://github.com/cybrid-systems/daedalus/issues/6)):
+
+```bash
+./scripts/run-aura.sh examples/10-vision-pipeline/main.aura
+./scripts/from-image.sh examples/10-vision-pipeline/fixtures/divider.svg
+```
+
 ## Relation to Unify
 
 May be consumed as a deep project under `unify/projects/daedalus` or kept as a

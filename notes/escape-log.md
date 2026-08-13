@@ -43,6 +43,16 @@ is optional product glue, not denseness core.
 No leave from \(V_A\). Shockley diode, Ebers-Moll NPN, dense Newton-Raphson (with
 `pnjlim` + gmin), and BE+NR `.tran` are pure Aura on the existing dense GE kernel.
 
+## Issue #6 (vision pipeline)
+
+Core path (`ir` / `validate` / `repair` / `from-ir` / fixture `from-image`) stays
+in \(V_A\). The optional live extractor `scripts/extract-ir.py` is a **metered
+host escape** (xAI or MiniMax multimodal). Probes use fixtures only (`E=0`).
+
+| Date | Location | Reason | Mechanism | Impact | Mitigation / Plan |
+|------|----------|--------|-----------|--------|-------------------|
+| 2026-08-13 | `scripts/extract-ir.py` | Schematic photo → IR | HTTP VLM (xAI default; MiniMax optional) | Offline probes do not call it | Fixture `from-image`; log every live call |
+
 ## Convention
 
 - Prefer pure Aura on the evolvable circuit core (netlist, stamp, agent loop).

@@ -76,3 +76,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] denseness probe 07 (diode `.op`)
 - [x] denseness probe 08 (BJT switch + CE `.op`)
 - [x] denseness probe 09 (diode clamp + BJT switch `.tran`)
+- [x] Vision → IR → repair → simulate (`ir`/`validate`/`repair`/`vision`, probe 10; issue #6)

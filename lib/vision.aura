@@ -1,0 +1,174 @@
+; lib/vision.aura — Image / IR → repair → simulate entry (issue #6 / #11)
+;
+; (require "vision" all:)
+;
+; Core path is pure Aura: from-ir / from-image (fixture).
+; Live VLM extraction is a metered host escape (scripts/extract-ir.py).
+; Do not trust extractor output; validate + repair decide correctness.
+
+(export daed:vision-version
+        daed:fixture-register!
+        daed:fixture-lookup
+        daed:install-builtin-fixtures!
+        daed:basename
+        daed:from-ir
+        daed:from-image
+        daed:pipe-ok?
+        daed:pipe-circuit
+        daed:pipe-sim
+        daed:pipe-html
+        daed:pipe-trace
+        daed:pipe-reason)
+
+(require "netlist" all:)
+(require "ir" all:)
+(require "validate" all:)
+(require "repair" all:)
+(require "solve" all:)
+(require "probe" all:)
+(require "viz" all:)
+
+(define daed:vision-version 1)
+
+(define *daed-fixtures* (hash))
+
+(define (daed:fixture-register! key ir)
+  (hash-set! *daed-fixtures* key ir)
+  key)
+
+(define (daed:fixture-lookup key)
+  (hash-ref *daed-fixtures* key #f))
+
+; Last path segment, for fixture keys.
+(define (daed:basename path)
+  (if (not (string? path))
+    ""
+    (let ((n (string-length path))
+          (i 0)
+          (cut 0))
+      (while (lambda () (< i n))
+        (lambda ()
+          (let ((ch (substring path i (+ i 1))))
+            (if (or (equal? ch "/") (equal? ch "\\"))
+              (set! cut (+ i 1))
+              0))
+          (set! i (+ i 1))))
+      (substring path cut n))))
+
+(define (daed:stem name)
+  (let ((n (string-length name))
+        (dot -1)
+        (i 0))
+    (while (lambda () (< i n))
+      (lambda ()
+        (if (equal? (substring name i (+ i 1)) ".")
+          (set! dot i)
+          0)
+        (set! i (+ i 1))))
+    (if (< dot 0)
+      name
+      (substring name 0 dot))))
+
+(define (daed:install-builtin-fixtures!)
+  (daed:fixture-register! "divider" (daed:ir-ex-divider))
+  (daed:fixture-register! "divider.png" (daed:ir-ex-divider))
+  (daed:fixture-register! "divider.svg" (daed:ir-ex-divider))
+  (daed:fixture-register! "divider.jpg" (daed:ir-ex-divider))
+  (daed:fixture-register! "01-voltage-divider" (daed:ir-ex-divider))
+  (daed:fixture-register! "rc-lowpass" (daed:ir-ex-rc))
+  (daed:fixture-register! "rc-lowpass.png" (daed:ir-ex-rc))
+  (daed:fixture-register! "rc-lowpass.svg" (daed:ir-ex-rc))
+  (daed:fixture-register! "02-rc-lowpass" (daed:ir-ex-rc))
+  (daed:fixture-register! "series-r" (daed:ir-ex-series-r))
+  (daed:fixture-register! "series-r.png" (daed:ir-ex-series-r))
+  (daed:fixture-register! "norton" (daed:ir-ex-norton))
+  (daed:fixture-register! "norton.png" (daed:ir-ex-norton))
+  (daed:fixture-register! "diode-fwd" (daed:ir-ex-diode))
+  (daed:fixture-register! "diode-fwd.png" (daed:ir-ex-diode))
+  #t)
+
+; IR hash already? (has "comps" and not "name" as circuit)
+(define (daed:looks-like-ir? x)
+  (and x
+       (hash-ref x "comps" #f)
+       (or (hash-ref x "schema" #f)
+           (not (list? (hash-ref x "comps" #f)))
+           #t)))
+
+(define (daed:from-ir ir budget)
+  (let ((res (hash))
+        (lim (if (and (number? budget) (> budget 0)) budget 12)))
+    (hash-set! res "ok" #f)
+    (hash-set! res "reason" "init")
+    (hash-set! res "ir" ir)
+    (hash-set! res "source" "ir")
+    (if (not ir)
+      (begin
+        (hash-set! res "reason" "no-ir")
+        res)
+      (let ((pre (daed:validate-ir ir))
+            (ckt (daed:ir->circuit ir)))
+        (hash-set! res "issues-ir" pre)
+        (hash-set! res "circuit" ckt)
+        (let ((rep (daed:repair-ckt! ckt lim)))
+          (hash-set! res "repair" rep)
+          (hash-set! res "repair-trace" (daed:repair-trace rep))
+          (let ((sim (daed:simulate-op ckt)))
+            (hash-set! res "sim" sim)
+            (hash-set! res "html" (daed:circuit->html ckt sim))
+            (if (and (daed:op-ok? sim)
+                     (<= (daed:issues-error-count (daed:validate-ckt ckt)) 0))
+              (begin
+                (hash-set! res "ok" #t)
+                (hash-set! res "reason" "ok"))
+              (begin
+                (hash-set! res "ok" #f)
+                (hash-set! res "reason"
+                  (if (daed:op-ok? sim) "validate" "sim"))))
+            res))))))
+
+; Image path → fixture IR (offline). Live VLM is scripts/extract-ir.py.
+; Passing an IR hash is accepted (same as from-ir).
+(define (daed:from-image path)
+  (if (and path (hash-ref path "comps" #f))
+    (let ((r (daed:from-ir path 12)))
+      (hash-set! r "source" "ir-hash")
+      r)
+    (let ((res (hash))
+          (base (daed:basename path))
+          (ir #f))
+      (hash-set! res "ok" #f)
+      (hash-set! res "reason" "init")
+      (hash-set! res "path" path)
+      (hash-set! res "source" "fixture")
+      (set! ir (daed:fixture-lookup base))
+      (if (not ir)
+        (set! ir (daed:fixture-lookup (daed:stem base)))
+        0)
+      (if (not ir)
+        (begin
+          (hash-set! res "reason" "no-fixture")
+          (hash-set! res "hint" "register fixture or run scripts/extract-ir.py")
+          res)
+        (let ((r (daed:from-ir ir 12)))
+          (hash-set! r "path" path)
+          (hash-set! r "source" "fixture")
+          r)))))
+
+(define (daed:pipe-ok? r)
+  (hash-ref r "ok" #f))
+
+(define (daed:pipe-circuit r)
+  (hash-ref r "circuit" #f))
+
+(define (daed:pipe-sim r)
+  (hash-ref r "sim" #f))
+
+(define (daed:pipe-html r)
+  (hash-ref r "html" ""))
+
+(define (daed:pipe-trace r)
+  (hash-ref r "repair-trace" '()))
+
+(define (daed:pipe-reason r)
+  (hash-ref r "reason" ""))
