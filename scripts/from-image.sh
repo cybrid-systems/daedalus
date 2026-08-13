@@ -62,6 +62,12 @@ if ./scripts/run-aura.sh "$DRIVER" 2>&1 | tee "/tmp/daed-from-image.log" | tail 
 fi
 
 if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
+  if [[ -z "${MINIMAX_API_KEY:-}" && -f "${HOME}/code/keys/minimax" ]]; then
+    MINIMAX_API_KEY="$(tr -d ' \n\r' < "${HOME}/code/keys/minimax")"
+    export MINIMAX_API_KEY
+    export DAEDALUS_VLM="${DAEDALUS_VLM:-minimax}"
+    export DAEDALUS_VLM_MODEL="${DAEDALUS_VLM_MODEL:-MiniMax-M3}"
+  fi
   if [[ -z "${XAI_API_KEY:-}" && -z "${MINIMAX_API_KEY:-}" ]]; then
     echo "no fixture for ${STEM}; set XAI_API_KEY or MINIMAX_API_KEY to extract" >&2
     exit 1
@@ -104,7 +110,17 @@ lines += [
     "(define r (daed:from-ir ir 12))",
     '(display "source=vlm ok=")',
     "(display (daed:pipe-ok? r))",
+    '(display " reason=")',
+    "(display (daed:pipe-reason r))",
     "(newline)",
+    "(let ((sim (daed:pipe-sim r)))",
+    '  (display "v1=")',
+    "  (display (daed:v sim 1))",
+    '  (display " v2=")',
+    "  (display (daed:v sim 2))",
+    '  (display " v3=")',
+    "  (display (daed:v sim 3))",
+    "  (newline))",
     '(if (daed:pipe-ok? r)',
     '  (begin (display "RESULT pass example=from-image source=vlm") (newline))',
     '  (begin (display "RESULT fail example=from-image") (newline)))',
