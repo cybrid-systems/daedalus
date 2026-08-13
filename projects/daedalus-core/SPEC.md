@@ -94,3 +94,4 @@ Full device models (BSIM etc.), commercial sparse solvers, schematic UI, mixed-s
 - [x] SPICE export for sign-off (issue #26, probe 25)
 - [x] Roadmap M0–M4 recorded (issue #27); M5 native kernel remains open (#28)
 - [x] Native C++ dense-solve hot-swap + fallback (issue #28, probe 26)
+- [x] ABI + build conventions for C++ kernels (issue #29)

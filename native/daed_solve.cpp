@@ -1,7 +1,7 @@
 /* native/daed_solve.cpp — dense GE kernel (issue #28 / #29)
  *
  * Educational dense solver, same shape as daed:dense-solve-pure!.
- * Build: ./scripts/build-native.sh
+ * Build: ./scripts/build-native.sh   or   cmake -S native -B native/build
  */
 #include "daed_abi.h"
 
@@ -16,7 +16,7 @@ int64_t daed_abi_version(void) {
 
 int64_t daed_set_fail(int64_t on) {
     g_fail = on;
-    return 0;
+    return DAED_OK;
 }
 
 static double at(const double* A, int64_t n, int64_t i, int64_t j) {
@@ -41,26 +41,7 @@ static void swap_rows(double* A, double* b, int64_t n, int64_t r1, int64_t r2) {
     b[r2] = tb;
 }
 
-int64_t daed_dispatch(int64_t op, int64_t a, int64_t b, int64_t c) {
-    if (op == 0) {
-        return daed_abi_version();
-    }
-    if (op == 1) {
-        return daed_set_fail(a);
-    }
-    if (op == 2) {
-        return daed_solve_dense(reinterpret_cast<double*>(a), reinterpret_cast<double*>(b), c);
-    }
-    return 4;
-}
-
-int64_t daed_solve_dense(double* A, double* b, int64_t n) {
-    if (g_fail) {
-        return 2;
-    }
-    if (A == nullptr || b == nullptr || n <= 0) {
-        return 1;
-    }
+static int64_t solve_inplace(double* A, double* b, int64_t n) {
     for (int64_t col = 0; col < n; ++col) {
         int64_t piv = col;
         double best = std::fabs(at(A, n, col, col));
@@ -72,7 +53,7 @@ int64_t daed_solve_dense(double* A, double* b, int64_t n) {
             }
         }
         if (best < DAED_GE_EPS) {
-            return 3;
+            return DAED_ERR_SINGULAR;
         }
         swap_rows(A, b, n, col, piv);
         double diag = at(A, n, col, col);
@@ -92,9 +73,60 @@ int64_t daed_solve_dense(double* A, double* b, int64_t n) {
         }
         double diag = at(A, n, i, i);
         if (std::fabs(diag) < DAED_GE_EPS) {
-            return 3;
+            return DAED_ERR_SINGULAR;
         }
         b[i] = s / diag;
     }
-    return 0;
+    return DAED_OK;
+}
+
+int64_t daed_dispatch(int64_t op, int64_t a, int64_t b, int64_t c) {
+    if (op == 0) {
+        return daed_abi_version();
+    }
+    if (op == 1) {
+        return daed_set_fail(a);
+    }
+    if (op == 2) {
+        return daed_solve_dense(reinterpret_cast<double*>(a),
+                                reinterpret_cast<double*>(b), c);
+    }
+    if (op == 3) {
+        return daed_solve_dense_work_n(a);
+    }
+    return DAED_ERR_OP;
+}
+
+int64_t daed_solve_dense(double* A, double* b, int64_t n) {
+    if (g_fail) {
+        return DAED_ERR_POISON;
+    }
+    if (A == nullptr || b == nullptr || n <= 0) {
+        return DAED_ERR_ARG;
+    }
+    return solve_inplace(A, b, n);
+}
+
+int64_t daed_solve_dense_work_n(int64_t n) {
+    if (n <= 0) {
+        return 0;
+    }
+    return n * n;
+}
+
+int64_t daed_solve_dense_ws(double* A, double* b, int64_t n, double* work) {
+    if (g_fail) {
+        return DAED_ERR_POISON;
+    }
+    if (A == nullptr || b == nullptr || n <= 0) {
+        return DAED_ERR_ARG;
+    }
+    if (work == nullptr) {
+        return DAED_ERR_WORK;
+    }
+    int64_t nn = n * n;
+    for (int64_t i = 0; i < nn; ++i) {
+        work[i] = A[i];
+    }
+    return solve_inplace(work, b, n);
 }

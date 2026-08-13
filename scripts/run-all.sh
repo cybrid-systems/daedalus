@@ -88,8 +88,22 @@ else
   failed_list+=("export-roundtrip")
 fi
 
+echo "======== check-native-abi ========"
+if ./scripts/check-native-abi.sh 2>&1 | tee /tmp/daedalus-check-native-abi.log | tail -20; then
+  if rg -q "RESULT pass" /tmp/daedalus-check-native-abi.log 2>/dev/null \
+     || grep -q "RESULT pass" /tmp/daedalus-check-native-abi.log; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    failed_list+=("check-native-abi")
+  fi
+else
+  fail=$((fail + 1))
+  failed_list+=("check-native-abi")
+fi
+
 echo "======== summary ========"
-echo "pass=$pass fail=$fail total=$(( ${#PROBES[@]} + 2 )) (probes=${#PROBES[@]} + ngspice-compare + export-roundtrip)"
+echo "pass=$pass fail=$fail total=$(( ${#PROBES[@]} + 3 )) (probes=${#PROBES[@]} + ngspice-compare + export-roundtrip + check-native-abi)"
 if [[ "$fail" -ne 0 ]]; then
   echo "failed: ${failed_list[*]}" >&2
   exit 1

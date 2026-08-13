@@ -23,5 +23,5 @@ fi
 
 "$CXX" -O2 -fPIC -std=c++17 "${EXTRA[@]}" -I"$INC" -o "$OUT" "$SRC"
 echo "[daedalus] native kernel: $OUT"
-nm -D "$OUT" 2>/dev/null | grep -E 'daed_(abi_version|solve_dense|set_fail|dispatch)' || \
-  nm "$OUT" 2>/dev/null | grep -E 'daed_(abi_version|solve_dense|set_fail|dispatch)' || true
+nm -D "$OUT" 2>/dev/null | grep -E 'daed_(abi_version|solve_dense|solve_dense_ws|solve_dense_work_n|set_fail|dispatch)' || \
+  nm "$OUT" 2>/dev/null | grep -E 'daed_(abi_version|solve_dense|solve_dense_ws|solve_dense_work_n|set_fail|dispatch)' || true

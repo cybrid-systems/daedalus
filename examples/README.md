@@ -41,6 +41,8 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 25 | [spice-export](25-spice-export/) | FlatAST → SPICE export | **PASS** (issue #26 / M4) |
 | 26 | [native-hotswap](26-native-hotswap/) | C++ GE hot-swap + fallback | **PASS** (issue #28 / M5) |
 
+ABI/build conventions (issue #29): `./scripts/check-native-abi.sh` — `nm`/`dlsym` + workspace variant, no Aura required.
+
 ## Phase map
 
 | Phase | Probes | Focus |

@@ -13,6 +13,7 @@ Build the `.so` once, then run the probe:
 
 ```bash
 ./scripts/build-native.sh
+./scripts/check-native-abi.sh
 ./scripts/run-aura.sh examples/26-native-hotswap/main.aura
 ```
 

@@ -1,7 +1,7 @@
 # Denseness Report — Daedalus
 
-**Date:** 2026-08-13  
-**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–26** PASS; core \(E=0\) on the default pure backend. Native GE (probe 26) is a metered opt-in escape.  
+**Date:** 2026-08-14  
+**Status:** **Phase 5 + M0–M5** — probes **00–03, 05–26** PASS; `check-native-abi` PASS (issue #29). Core \(E=0\) on the default pure backend. Native GE (probe 26) is a metered opt-in escape.  
 **Judgment:** **strong on P0 slice + educational nonlinear + fixture vision path** — linear DC/tran, mutate, agent, diode/BJT NR, IR/repair, and matched-T ngspice compare hold. Live photo accuracy remains a product loop, not a denseness blocker.
 
 **Theory:** [span-design.md](span-design.md) · repo [README.md](../README.md)  
@@ -172,6 +172,13 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 - `native.aura`: `c-load` + Opaque copy-in/out; `solve-rebind!` is the Hephaestus rebind-safe pattern.
 - `dense-solve!` dispatches; default `"pure"` (probes 00–25 stay E=0). Native fail flips back to pure and retries.
 - Probe 26: divider matches; escape +1 on native; poison → fallback; snapshot restore.
+
+### Issue #29 narrative (ABI + build conventions)
+
+- `extern "C"` rules, return-code table, and `DAED_ABI_VERSION=1` in `native/daed_abi.h`.
+- Optional workspace: `daed_solve_dense_ws` / `daed_solve_dense_work_n` (A preserved).
+- Build: `scripts/build-native.sh` (g++ `.so`/`.dylib`) and `native/CMakeLists.txt`.
+- `scripts/check-native-abi.sh`: `nm` unmangled `T` symbols + `dlsym` 2×2 example.
 
 ## Judgment
 

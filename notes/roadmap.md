@@ -7,7 +7,7 @@ Daedalus is a living laboratory: mutable FlatAST circuits, snapshot/rollback,
 agent loops. Production accuracy stays with ngspice / LTspice via export (#26).
 A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 
-**Suite:** 27/27 (25 probes + ngspice-compare + export-roundtrip), core \(E=0\).
+**Suite:** 29/29 (26 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
 
 | Milestone | Scope | Status |
 |-----------|--------|--------|
@@ -55,11 +55,12 @@ Related: #2 (Phase 5), #3 diode, #4 BJT, #5 Newton-Raphson.
 Parent: **[#28](https://github.com/cybrid-systems/daedalus/issues/28)** — probe 26.
 
 The #28 success criteria are met (ABI, `c-load`, rebind-safe pattern, Opaque
-copy, divider demo, optional dispatch). Sub-issues #29–#34 remain for
-follow-up polish unless closed separately.
+copy, divider demo, optional dispatch). #29 records the export rules, workspace
+variant, CMake + g++ one-liner, and `nm`/`dlsym` check. Sub-issues #30–#34
+remain for follow-up polish unless closed separately.
 
 - [x] [#28](https://github.com/cybrid-systems/daedalus/issues/28) Parent success criteria — probe 26
-- [ ] [#29](https://github.com/cybrid-systems/daedalus/issues/29) ABI + build conventions
+- [x] [#29](https://github.com/cybrid-systems/daedalus/issues/29) ABI + build conventions
 - [ ] [#30](https://github.com/cybrid-systems/daedalus/issues/30) Aura FFI (`c-load` / `c-func`)
 - [ ] [#31](https://github.com/cybrid-systems/daedalus/issues/31) Hephaestus wrapper + escape metering
 - [ ] [#32](https://github.com/cybrid-systems/daedalus/issues/32) Buffer / Opaque exchange
