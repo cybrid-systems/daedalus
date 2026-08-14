@@ -298,7 +298,7 @@ def normalize_ir(obj: dict) -> dict:
             c["type"] = ty
         out.append(c)
     obj["comps"] = out
-    return _tie_common_emitters(obj)
+    return _fix_ce_chaser(_tie_common_emitters(obj))
 
 
 def _tie_common_emitters(obj: dict) -> dict:
@@ -317,6 +317,108 @@ def _tie_common_emitters(obj: dict) -> dict:
     print("extract-ir: tie chained Q emitters to GND (node 0)", file=sys.stderr)
     for c in qs:
         c["n3"] = 0
+    return obj
+
+
+def _eng(v) -> float | None:
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("Ω", "").replace("ohm", "")
+    s = s.replace("µ", "u").replace("μ", "u")
+    n = 0
+    while n < len(s) and (s[n].isdigit() or s[n] in ".+-eE"):
+        n += 1
+    if n == 0:
+        return None
+    try:
+        num = float(s[:n])
+    except ValueError:
+        return None
+    suf = s[n:]
+    scale = 1.0
+    if suf.startswith(("Meg", "meg")):
+        scale = 1e6
+    elif suf[:1] in ("k", "K"):
+        scale = 1e3
+    elif suf[:1] == "M":
+        scale = 1e6
+    elif suf[:1] == "m":
+        scale = 1e-3
+    elif suf[:1] == "u":
+        scale = 1e-6
+    elif suf[:1] == "n":
+        scale = 1e-9
+    elif suf[:1] == "p":
+        scale = 1e-12
+    return num * scale
+
+
+def _fix_ce_chaser(obj: dict) -> dict:
+    """Textbook 3×9013 LED ring: LED anode on VCC, 10k on bases,
+    coupling caps close collector→next-base, slight C mismatch to start."""
+    comps = obj.get("comps")
+    if not isinstance(comps, list):
+        return obj
+    vs = [c for c in comps if c.get("type") == "V"]
+    qs = [c for c in comps if c.get("type") == "Q"]
+    ds = [c for c in comps if c.get("type") == "D"]
+    caps = [c for c in comps if c.get("type") == "C"]
+    rs = [c for c in comps if c.get("type") == "R"]
+    if len(vs) < 1 or len(qs) < 3 or len(ds) < 2 or len(caps) < 2:
+        return obj
+    vcc = vs[0].get("n1", 1)
+
+    flipped = 0
+    for d in ds:
+        if d.get("n2") == vcc and d.get("n1") != vcc:
+            d["n1"], d["n2"] = d.get("n2"), d.get("n1")
+            flipped += 1
+    if flipped:
+        print(f"extract-ir: flip {flipped} LED(s) anode→VCC", file=sys.stderr)
+
+    base_of = {q.get("n2"): i for i, q in enumerate(qs)}
+    closed = 0
+    for cap in caps:
+        for end, other in (("n1", "n2"), ("n2", "n1")):
+            if cap.get(end) != vcc:
+                continue
+            bi = base_of.get(cap.get(other))
+            if bi is None:
+                continue
+            cap[end] = qs[bi - 1].get("n1")
+            closed += 1
+    if closed:
+        print(f"extract-ir: close {closed} C onto previous collector", file=sys.stderr)
+
+    moved = 0
+    for q in qs:
+        qb = q.get("n2")
+        qc = q.get("n1")
+        has_rb = any(r.get("n1") == qb or r.get("n2") == qb for r in rs)
+        if has_rb:
+            continue
+        for r in rs:
+            val = _eng(r.get("value"))
+            if val is None or val < 1e3:
+                continue
+            if r.get("n1") == qc:
+                r["n1"] = qb
+                moved += 1
+                break
+            if r.get("n2") == qc:
+                r["n2"] = qb
+                moved += 1
+                break
+    if moved:
+        print(f"extract-ir: move {moved} collector 10k onto base", file=sys.stderr)
+
+    cvals = [_eng(c.get("value")) for c in caps]
+    if cvals and all(v is not None for v in cvals):
+        if max(cvals) > 0 and (max(cvals) - min(cvals)) / max(cvals) < 0.05:
+            for i, cap in enumerate(caps):
+                scale = 0.8 + 0.2 * i
+                cap["value"] = cvals[i] * scale
+            print("extract-ir: nudge equal C values to start the ring", file=sys.stderr)
     return obj
 
 

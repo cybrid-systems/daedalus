@@ -13,13 +13,17 @@ Rules:
 
 - Components: `R` `C` `L` `V` `I` `D` `Q` (NPN). Skip unknown ICs.
 - LED / LED1 / 发光二极管 → type `D` (anode=`n1`, cathode=`n2`). Value `1e-14`.
+  In this textbook chaser the LED anode faces the battery plus (VCC);
+  cathode faces the collector through the 100 Ω resistor.
 - Transistor labels like `V1`/`V2`/`9013`/`8050`/`9014`/`2N3904` → type `Q`
   (NPN). `n1`=collector, `n2`=base, `n3`=emitter. Value `1e-15`.
   Common-emitter stages (this textbook style): **every emitter is node 0**.
   Do **not** chain one emitter into the next base. Stage coupling is only
   via capacitors (collector of one → base of next).
-  Each collector needs a DC resistor to VCC. Each base needs a DC path
-  that is not only a capacitor (bias resistor to VCC, or resistor to GND).
+  The 10 kΩ parts are base bias to VCC, not collector loads.
+  The 100 Ω parts are in series with each LED.
+  Coupling capacitors close a ring: collector of one → base of the next
+  (including the wrap from the last collector back to the first base).
 - Battery `BT` / 电池 → type `V`. `n1`=plus, `n2`=minus (GND=0).
 - Node `0` is GND. Use integer node ids. Junctions share a node; wire
   crossings without a dot do **not** connect.

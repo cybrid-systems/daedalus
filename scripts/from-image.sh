@@ -135,6 +135,49 @@ lines += [
     '        (display "v(") (display i) (display ")=")',
     "        (display (daed:v sim i)) (newline)",
     "        (loop (+ i 1))))))",
+]
+
+has_dyn = any(c.get("type") in ("C", "L") for c in comps)
+qcols = [c.get("n1") for c in comps if c.get("type") == "Q"]
+watch = qcols or [2, 3]
+if has_dyn:
+    csv_path = str(Path(sys.argv[1]).with_suffix(".tran.csv"))
+    lines += [
+        '(display "note: .op treats C as open; oscillation is .tran") (newline)',
+        "(define tr (daed:simulate-tran ckt 0.1 40))",
+        '(display "=== .tran tstop=")',
+        "(display (daed:tran-tstop tr))",
+        '(display " ok=")',
+        "(display (daed:tran-ok? tr))",
+        "(newline)",
+        "(let ((ts (list 0.0 0.4 0.8 1.2 1.6 2.0 2.4 2.8 3.2 4.0)))",
+        "  (let loop ((xs ts))",
+        "    (if (null? xs) 0",
+        "      (begin",
+        '        (display "  t=") (display (car xs))',
+    ]
+    for n in watch:
+        lines += [
+            f'        (display " v({n})=")',
+            f"        (display (daed:tran-v-at-t tr {n} (car xs)))",
+        ]
+    lines += [
+        "        (newline)",
+        "        (loop (cdr xs))))))",
+    ]
+    for n in watch:
+        lines += [
+            f"(let ((mx (daed:measure-max tr {n})) (mn (daed:measure-min tr {n})))",
+            f'  (display "  pp v({n})=")',
+            "  (display (- (daed:meas-value mx) (daed:meas-value mn)))",
+            "  (newline))",
+        ]
+    lines += [
+        f"(daed:write-tran-csv! tr {json.dumps(csv_path)})",
+        f'(display "tran csv={csv_path}") (newline)',
+    ]
+
+lines += [
     '(if (daed:pipe-ok? r)',
     '  (begin (display "RESULT pass example=from-image source=vlm") (newline))',
     '  (begin (display "RESULT fail example=from-image") (newline)))',
