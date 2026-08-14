@@ -75,6 +75,8 @@ if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
   echo "from-image: fixture miss → extract-ir.py (escape)" >&2
   JSON="$(mktemp /tmp/daed-ir.XXXXXX.json)"
   python3 "$ROOT/scripts/extract-ir.py" "$IMG" -o "$JSON"
+  echo "from-image: IR json=${JSON}" >&2
+  cat "$JSON"
   python3 - "$JSON" "$DRIVER" <<'PY'
 import json, sys
 from pathlib import Path
@@ -106,6 +108,14 @@ for c in comps:
             f'  (daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
         )
 lines.append("))")
+lines.append('(display "=== IR comps ===") (newline)')
+for c in comps:
+    extra = f" n3={c.get('n3')}" if c.get("type") == "Q" else ""
+    row = (
+        f"  {c.get('type')} {c.get('name')} "
+        f"n1={c.get('n1')} n2={c.get('n2')}{extra} ={c.get('value')}"
+    )
+    lines.append(f"(display {json.dumps(row)}) (newline)")
 lines += [
     "(define r (daed:from-ir ir 12))",
     '(display "source=vlm ok=")',
@@ -113,14 +123,18 @@ lines += [
     '(display " reason=")',
     "(display (daed:pipe-reason r))",
     "(newline)",
-    "(let ((sim (daed:pipe-sim r)))",
-    '  (display "v1=")',
-    "  (display (daed:v sim 1))",
-    '  (display " v2=")',
-    "  (display (daed:v sim 2))",
-    '  (display " v3=")',
-    "  (display (daed:v sim 3))",
-    "  (newline))",
+    "(define ckt (daed:pipe-circuit r))",
+    "(define sim (daed:pipe-sim r))",
+    '(display "=== SPICE ===") (newline)',
+    "(display (daed:circuit->spice ckt))",
+    '(display "=== .op nodes ===") (newline)',
+    "(let ((nmax (daed:max-node (daed:ckt-comps ckt))))",
+    "  (let loop ((i 0))",
+    "    (if (> i nmax) 0",
+    "      (begin",
+    '        (display "v(") (display i) (display ")=")',
+    "        (display (daed:v sim i)) (newline)",
+    "        (loop (+ i 1))))))",
     '(if (daed:pipe-ok? r)',
     '  (begin (display "RESULT pass example=from-image source=vlm") (newline))',
     '  (begin (display "RESULT fail example=from-image") (newline)))',
