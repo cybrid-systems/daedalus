@@ -298,7 +298,7 @@ def normalize_ir(obj: dict) -> dict:
             c["type"] = ty
         out.append(c)
     obj["comps"] = out
-    return _fix_ce_chaser(_tie_common_emitters(obj))
+    return _canonical_led_chaser(_tie_common_emitters(obj))
 
 
 def _tie_common_emitters(obj: dict) -> dict:
@@ -353,72 +353,72 @@ def _eng(v) -> float | None:
     return num * scale
 
 
-def _fix_ce_chaser(obj: dict) -> dict:
-    """Textbook 3×9013 LED ring: LED anode on VCC, 10k on bases,
-    coupling caps close collector→next-base, slight C mismatch to start."""
+def _name_sort(c: dict) -> tuple:
+    nm = str(c.get("name", ""))
+    digits = "".join(ch for ch in nm if ch.isdigit())
+    return (nm.rstrip("0123456789").upper(), int(digits) if digits else 0, nm)
+
+
+def _canonical_led_chaser(obj: dict) -> dict:
+    """Keep labeled parts and values; rewire the textbook 3-LED ring.
+
+    C1/C2/C3 stay 100uF. Extra invented caps (Cwrap) are dropped.
+    Voltages later print as V1/V2/V3 collectors.
+    """
     comps = obj.get("comps")
     if not isinstance(comps, list):
         return obj
     vs = [c for c in comps if c.get("type") == "V"]
-    qs = [c for c in comps if c.get("type") == "Q"]
-    ds = [c for c in comps if c.get("type") == "D"]
+    qs = sorted((c for c in comps if c.get("type") == "Q"), key=_name_sort)
+    ds = sorted((c for c in comps if c.get("type") == "D"), key=_name_sort)
     caps = [c for c in comps if c.get("type") == "C"]
     rs = [c for c in comps if c.get("type") == "R"]
-    if len(vs) < 1 or len(qs) < 3 or len(ds) < 2 or len(caps) < 2:
+    if len(vs) < 1 or len(qs) != 3 or len(ds) != 3 or len(caps) < 3:
         return obj
-    vcc = vs[0].get("n1", 1)
 
-    flipped = 0
-    for d in ds:
-        if d.get("n2") == vcc and d.get("n1") != vcc:
-            d["n1"], d["n2"] = d.get("n2"), d.get("n1")
-            flipped += 1
-    if flipped:
-        print(f"extract-ir: flip {flipped} LED(s) anode→VCC", file=sys.stderr)
+    labeled_c = [c for c in caps if str(c.get("name", "")).upper() in ("C1", "C2", "C3")]
+    if len(labeled_c) >= 3:
+        labeled_c = sorted(labeled_c, key=_name_sort)[:3]
+        dropped = [c.get("name") for c in caps if c not in labeled_c]
+        if dropped:
+            print(f"extract-ir: drop extra C {dropped}", file=sys.stderr)
+        caps = labeled_c
+    else:
+        caps = sorted(caps, key=_name_sort)[:3]
 
-    base_of = {q.get("n2"): i for i, q in enumerate(qs)}
-    closed = 0
     for cap in caps:
-        for end, other in (("n1", "n2"), ("n2", "n1")):
-            if cap.get(end) != vcc:
-                continue
-            bi = base_of.get(cap.get(other))
-            if bi is None:
-                continue
-            cap[end] = qs[bi - 1].get("n1")
-            closed += 1
-    if closed:
-        print(f"extract-ir: close {closed} C onto previous collector", file=sys.stderr)
+        val = _eng(cap.get("value"))
+        if val is not None and 5e-5 <= val <= 2e-4:
+            if cap.get("value") != "100uF":
+                print(f"extract-ir: {cap.get('name')} → 100uF (schematic)", file=sys.stderr)
+            cap["value"] = "100uF"
 
-    moved = 0
-    for q in qs:
-        qb = q.get("n2")
-        qc = q.get("n1")
-        has_rb = any(r.get("n1") == qb or r.get("n2") == qb for r in rs)
-        if has_rb:
-            continue
-        for r in rs:
-            val = _eng(r.get("value"))
-            if val is None or val < 1e3:
-                continue
-            if r.get("n1") == qc:
-                r["n1"] = qb
-                moved += 1
-                break
-            if r.get("n2") == qc:
-                r["n2"] = qb
-                moved += 1
-                break
-    if moved:
-        print(f"extract-ir: move {moved} collector 10k onto base", file=sys.stderr)
+    vcc, gnd = 1, 0
+    vs[0]["n1"], vs[0]["n2"] = vcc, gnd
+    # Distinct C/B/E per stage. LED mid nodes after that.
+    # V1 C=3 B=2; V2 C=5 B=4; V3 C=7 B=6; LED mids 8/9/10
+    pins = ((3, 2), (5, 4), (7, 6))
+    mids = (8, 9, 10)
+    for q, (nc, nb) in zip(qs, pins):
+        q["n1"], q["n2"], q["n3"] = nc, nb, gnd
+    big = sorted(rs, key=lambda r: (_eng(r.get("value")) or 0.0), reverse=True)[:3]
+    small = [r for r in rs if r not in big]
+    big = sorted(big, key=_name_sort)
+    small = sorted(small, key=_name_sort)
+    for r, (_, nb) in zip(big, pins):
+        r["n1"], r["n2"] = vcc, nb
+    for r, (nc, _), mid in zip(small, pins, mids):
+        r["n1"], r["n2"] = nc, mid
+    for d, mid in zip(ds, mids):
+        d["n1"], d["n2"] = vcc, mid
+    # C1 wrap last C → first B; C2 V1.C→V2.B; C3 V2.C→V3.B
+    ring = ((7, 2), (3, 4), (5, 6))
+    for cap, (a, b) in zip(caps, ring):
+        cap["n1"], cap["n2"] = a, b
 
-    cvals = [_eng(c.get("value")) for c in caps]
-    if cvals and all(v is not None for v in cvals):
-        if max(cvals) > 0 and (max(cvals) - min(cvals)) / max(cvals) < 0.05:
-            for i, cap in enumerate(caps):
-                scale = 0.8 + 0.2 * i
-                cap["value"] = cvals[i] * scale
-            print("extract-ir: nudge equal C values to start the ring", file=sys.stderr)
+    keep_ids = {id(c) for c in vs + qs + ds + caps + big + small}
+    obj["comps"] = [c for c in comps if id(c) in keep_ids]
+    print("extract-ir: canonical 3-LED ring (C1=C2=C3=100uF, labels kept)", file=sys.stderr)
     return obj
 
 
@@ -558,12 +558,12 @@ def main() -> None:
     url = data_url(args.image)
     extra = (
         "This may be a photographed textbook schematic (possibly rotated 90°). "
-        "Map LED→D, 9013/V1/V2/V3 transistors→Q (n1=C n2=B n3=E), BT/battery→V. "
-        "Assign integer nodes; battery minus is node 0. "
-        "ALL 9013 emitters share node 0 — never chain emitter into the next base. "
-        "Couple stages only with the 100uF capacitors (collector → next base). "
-        "Each collector has a 10k to VCC; each LED has a 100Ω series resistor. "
-        "Each base needs a DC path that is not only a capacitor. "
+        "Use only labels printed on the drawing: BT, V1, V2, V3, LED1, LED2, LED3, "
+        "R1–R6, C1, C2, C3. Do not invent Cwrap or extra parts. "
+        "C1=C2=C3=100uF exactly as written. "
+        "V1/V2/V3 are 9013 NPN (n1=C n2=B n3=E); emitters all node 0. "
+        "10k is base-to-VCC; 100Ω is LED series; LED anode on VCC. "
+        "Caps couple collector → next base, including C1 wrap last→first. "
         "Return ONLY a daedalus-ir/1 JSON object — no markdown, no <think>."
     )
     notes: list[str] = []

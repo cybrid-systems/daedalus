@@ -127,19 +127,27 @@ lines += [
     "(define sim (daed:pipe-sim r))",
     '(display "=== SPICE ===") (newline)',
     "(display (daed:circuit->spice ckt))",
-    '(display "=== .op nodes ===") (newline)',
-    "(let ((nmax (daed:max-node (daed:ckt-comps ckt))))",
-    "  (let loop ((i 0))",
-    "    (if (> i nmax) 0",
-    "      (begin",
-    '        (display "v(") (display i) (display ")=")',
-    "        (display (daed:v sim i)) (newline)",
-    "        (loop (+ i 1))))))",
+    '(display "=== .op labels ===") (newline)',
 ]
 
+# Schematic labels: V1/V2/V3 = transistor collectors, then BT.
+labels = []
+for c in comps:
+    if c.get("type") == "Q" and c.get("name"):
+        labels.append((str(c["name"]), int(c.get("n1", 0))))
+for c in comps:
+    if c.get("type") == "V" and c.get("name"):
+        labels.append((str(c["name"]), int(c.get("n1", 0))))
+if not labels:
+    labels = [("n1", 1), ("n2", 2)]
+for nm, node in labels:
+    lines += [
+        f'(display {json.dumps(nm + "=")})',
+        f"(display (daed:v sim {node}))",
+        "(newline)",
+    ]
+
 has_dyn = any(c.get("type") in ("C", "L") for c in comps)
-qcols = [c.get("n1") for c in comps if c.get("type") == "Q"]
-watch = qcols or [2, 3]
 if has_dyn:
     csv_path = str(Path(sys.argv[1]).with_suffix(".tran.csv"))
     lines += [
@@ -156,19 +164,22 @@ if has_dyn:
         "      (begin",
         '        (display "  t=") (display (car xs))',
     ]
-    for n in watch:
-        lines += [
-            f'        (display " v({n})=")',
-            f"        (display (daed:tran-v-at-t tr {n} (car xs)))",
-        ]
+    for nm, node in labels:
+        if any(c.get("name") == nm and c.get("type") == "Q" for c in comps):
+            lines += [
+                f'        (display {json.dumps(" " + nm + "=")})',
+                f"        (display (daed:tran-v-at-t tr {node} (car xs)))",
+            ]
     lines += [
         "        (newline)",
         "        (loop (cdr xs))))))",
     ]
-    for n in watch:
+    for nm, node in labels:
+        if not any(c.get("name") == nm and c.get("type") == "Q" for c in comps):
+            continue
         lines += [
-            f"(let ((mx (daed:measure-max tr {n})) (mn (daed:measure-min tr {n})))",
-            f'  (display "  pp v({n})=")',
+            f"(let ((mx (daed:measure-max tr {node})) (mn (daed:measure-min tr {node})))",
+            f'  (display {json.dumps("  pp " + nm + "=")})',
             "  (display (- (daed:meas-value mx) (daed:meas-value mn)))",
             "  (newline))",
         ]

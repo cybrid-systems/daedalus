@@ -33,6 +33,8 @@ Rules:
 - Values as numbers or engineering strings (`1k`, `10k`, `100`, `100uF`, `3V`).
 - Prefer high recall: include a component even if the value is uncertain
   (`conf` < 1). The host will validate and repair.
+- Only extract parts that are labeled. Do **not** invent extras (`Cwrap`).
+  On 图2-8-1: C1=C2=C3=`100uF` as printed.
 
 JSON shape:
 
