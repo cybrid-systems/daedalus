@@ -173,7 +173,7 @@ def q_traces(ir: dict) -> list[dict]:
             color = LED_COLORS.get(str(ds[i].get("value", "")).lower(), color)
         node = q.get("n1")
         out.append({
-            "name": f"{q.get('name', 'Q')}.C",
+            "name": str(q.get("name") or "Q"),
             "col": f"v{node}",
             "node": node,
             "color": color,
@@ -269,14 +269,10 @@ def build_report(
             f'<circle class="probe" data-name="{esc(tr["name"])}" r="4.2" '
             f'fill="{tr["color"]}" stroke="#fff" stroke-width="1.2" cx="-20" cy="-20"/>'
         )
-        node = tr["node"]
-        ov = op.get(node)
-        ov_s = f"{ov:.3f} V" if isinstance(ov, float) else "—"
         legend.append(
             f'<label class="lg"><input type="checkbox" checked data-trace="{esc(tr["name"])}"/>'
             f'<span class="sw" style="background:{tr["color"]}"></span>'
-            f'{esc(tr["name"])} <span class="live" data-live="{esc(tr["name"])}">—</span>'
-            f'<em>.op {ov_s}</em></label>'
+            f'{esc(tr["name"])} <span class="live" data-live="{esc(tr["name"])}">—</span></label>'
         )
         wave_traces.append({
             "name": tr["name"],
@@ -284,19 +280,6 @@ def build_report(
             "v": [round(v, 5) for v in ys],
         })
 
-    photo = ""
-    if image and image.is_file() and image.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-        rel = os.path.relpath(image, OUT_DIR)
-        photo = (
-            f'<figure class="photo"><img src="{esc(rel)}" alt="source photo"/>'
-            f"<figcaption>{esc(str(image.name))}</figcaption></figure>"
-        )
-
-    op_rows = "".join(
-        f"<tr><td>n{k}</td><td>{v:.4f} V</td></tr>"
-        for k, v in sorted(op.items()) if k > 0
-    )
-    notes = esc(str(ir.get("notes") or ""))
     nudge_note = (
         f"C1 scaled ×{nudge:g} for .tran only (matched caps stay latched at DC). "
         if 0 < nudge < 1
@@ -320,15 +303,8 @@ body{margin:0;padding:1.25rem 1.4rem 2rem;background:#f5f5f4;color:#1c1917;
   font-family:ui-sans-serif,system-ui,sans-serif;}
 h1{font-size:1.2rem;margin:0 0 .25rem;font-weight:650;}
 .sub{color:#57534e;font-size:.9rem;margin:0 0 1rem;}
-.grid2{display:grid;gap:1rem;grid-template-columns:1fr;}
-@media(min-width:960px){.grid2{grid-template-columns:1fr 1.4fr;}}
-.card{background:#fff;border:1px solid #d6d3d1;border-radius:10px;padding:1rem;}
+.card{background:#fff;border:1px solid #d6d3d1;border-radius:10px;padding:1rem;margin-bottom:1rem;}
 .schematic{width:100%;display:block;background:#fffef7;border-radius:8px;}
-.photo img{width:100%;border-radius:8px;display:block;}
-.photo figcaption{color:#78716c;font-size:.8rem;margin-top:.4rem;}
-table{border-collapse:collapse;font-size:.85rem;}
-td,th{padding:.2rem .7rem .2rem 0;text-align:left;}
-td:last-child{font-variant-numeric:tabular-nums;}
 .chart{width:100%;height:auto;display:block;background:#fffefb;border-radius:8px;}
 .grid{stroke:#e7e5e4;stroke-width:1;}
 .tick{font-size:11px;fill:#78716c;font-family:ui-sans-serif,system-ui,sans-serif;}
@@ -352,18 +328,10 @@ pre{background:#1c1917;color:#e7e5e4;border-radius:8px;padding:.75rem 1rem;
 </head>
 <body>
 <h1>__TITLE__</h1>
-<p class="sub">Grok __MODEL__ · IR → schematic · .op + .tran
+<p class="sub">Grok __MODEL__ · schematic + .tran
  · dt=__DT__s · tstop=__TSTOP__s · __NSAMP__ samples</p>
-<div class="grid2">
-  <div class="card">__PHOTO__</div>
-  <div class="card">__SVG__</div>
-</div>
-<div class="card" style="margin-top:1rem">
-<h2 style="font-size:1rem;margin:0 0 .5rem">.op voltages</h2>
-<table><thead><tr><th>node</th><th>V</th></tr></thead><tbody>__OPROWS__</tbody></table>
-<p class="hint">__NOTES__</p>
-</div>
-<div class="card" style="margin-top:1rem">
+<div class="card">__SVG__</div>
+<div class="card">
 <h2 style="font-size:1rem;margin:0 0 .4rem">Collector waveforms (.tran)</h2>
 <div class="ctrl">
   <button type="button" class="primary" id="btn-play">Pause</button>
@@ -454,6 +422,10 @@ __GRID__
     el.style.opacity = String(0.22 + 0.78 * on);
     el.style.filter = on > 0.45 ? 'url(#led-glow)' : 'none';
   }
+  function setNode(name, v){
+    var el = document.querySelector('text.vnode[data-trace="'+name+'"]');
+    if (el) el.textContent = name + ' ' + v.toFixed(2) + 'V';
+  }
   function draw(){
     var i;
     for (i = 0; i < traces.length; i++){
@@ -471,7 +443,7 @@ __GRID__
         else { dot.setAttribute('cx', xAt(tnow)); dot.setAttribute('cy', yAt(v)); }
       }
       if (live) live.textContent = v.toFixed(3)+' V';
-      if (!hidden[tr.name]) setLed(tr.name, v);
+      if (!hidden[tr.name]) { setLed(tr.name, v); setNode(tr.name, v); }
     }
     var xc = xAt(tnow);
     var cur = document.getElementById('cursor');
@@ -534,10 +506,7 @@ __GRID__
         .replace("__DT__", f"{dt:g}")
         .replace("__TSTOP__", f"{tstop:g}")
         .replace("__NSAMP__", str(len(times)))
-        .replace("__PHOTO__", photo or "<p class='hint'>no source photo</p>")
         .replace("__SVG__", svg or "<p>no schematic svg</p>")
-        .replace("__OPROWS__", op_rows)
-        .replace("__NOTES__", notes)
         .replace("__GRID__", "".join(grid))
         .replace("__PATHS__", "".join(path_shells))
         .replace("__DOTS__", "".join(dots))

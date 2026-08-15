@@ -175,10 +175,24 @@
     "\" r=\"2.6\" fill=\"#111\"/>"))
 
 (define (daed:sch-text x y s)
+  (daed:sch-text-at x y s 11 "400"))
+
+(define (daed:sch-text-at x y s size weight)
   (string-append
     "<text x=\"" (daed:sch-s x) "\" y=\"" (daed:sch-s y)
-    "\" font-size=\"11\" font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
+    "\" font-size=\"" (daed:sch-s size)
+    "\" font-weight=\"" (daed:sch-s weight)
+    "\" font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
     s "</text>"))
+
+; Voltage node label at the collector junction (V1/V2/V3 = probe points).
+(define (daed:sch-vnode xc yc name)
+  (string-append
+    "<text class=\"vnode\" data-trace=\"" name
+    "\" x=\"" (daed:sch-s (- xc 8)) "\" y=\"" (daed:sch-s (- yc 8))
+    "\" text-anchor=\"end\" font-size=\"13\" font-weight=\"700\" "
+    "font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
+    name "</text>"))
 
 (define (daed:sch-lab c)
   (let ((nm (hash-ref c "name" ""))
@@ -304,9 +318,9 @@
               (daed:sch-sym-C xl cy #t)
               (daed:sch-plus (- xl 14) (+ cy 14))
               (daed:sch-line xl (+ cy gap) xl ybot)
-              (daed:sch-line xl ybot (+ xc 28) ybot)
-              (daed:sch-line (+ xc 28) ybot (+ xc 28) daed:sch-yc)
-              (daed:sch-line (+ xc 28) daed:sch-yc xc daed:sch-yc)
+              (daed:sch-line xl ybot (+ xc 54) ybot)
+              (daed:sch-line (+ xc 54) ybot (+ xc 54) daed:sch-yc)
+              (daed:sch-line (+ xc 54) daed:sch-yc xc daed:sch-yc)
               (daed:sch-dot xb daed:sch-yb)
               (daed:sch-dot xc daed:sch-yc)
               (daed:sch-text (+ xl 16) (+ cy 4) (daed:sch-lab c))))
@@ -421,9 +435,9 @@
           (daed:sch-dot xb daed:sch-yq)
           (daed:sch-line xc (+ daed:sch-yq 18) xc daed:sch-ygnd)
           (daed:sch-dot xc daed:sch-ygnd)
-          (daed:sch-text (+ xc 22) (+ daed:sch-yq 4)
-                        (string-append (hash-ref c "name" "Q") " "
-                                       (daed:sch-s (hash-ref c "value" ""))))))))))
+          (daed:sch-vnode xc daed:sch-yc (hash-ref c "name" "Q"))
+          (daed:sch-text-at (+ xc 22) (+ daed:sch-yq 4)
+                           (daed:sch-s (hash-ref c "value" "")) 11 "400")))))))
 
 (define (daed:sch-svg ir)
   (let ((comps (daed:ir-comps ir))
