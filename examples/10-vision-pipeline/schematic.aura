@@ -5,8 +5,11 @@
 (require "daedalus-min" all:)
 
 (define ir
-  (daed:ir-ingest "examples/10-vision-pipeline/out/3led.minimax.json"))
+  (daed:ir-ingest "examples/10-vision-pipeline/out/3led.json"))
 
+(if (not ir)
+  (set! ir (daed:ir-ingest "examples/10-vision-pipeline/out/3led.minimax.json"))
+  0)
 (if (not ir)
   (set! ir (daed:ir-ingest "examples/10-vision-pipeline/fixtures/3led.minimax.json"))
   0)
