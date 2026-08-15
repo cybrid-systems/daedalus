@@ -142,11 +142,18 @@
                                                 "R/C/L must be > 0" "fix-value")
                                     acc))
                     0)
-                  (if (and (or (equal? ty "D") (equal? ty "Q"))
-                           (or (not (number? val)) (<= val 0.0)))
-                    (set! acc (cons (daed:issue "warn" "bad-is" nm
-                                                "Is should be > 0" "fix-value")
-                                    acc))
+                  (if (or (equal? ty "D") (equal? ty "Q"))
+                    (let ((isv val)
+                          (pr (hash-ref c "params" #f)))
+                      (if (and pr (number? (hash-ref pr "Is" #f)))
+                        (set! isv (hash-ref pr "Is" 0))
+                        0)
+                      (if (or (not (number? isv)) (<= isv 0.0) (>= isv 1e-6))
+                        (set! acc (cons (daed:issue "warn" "bad-is" nm
+                                                    "Is should be a small positive current"
+                                                    "fix-value")
+                                        acc))
+                        0))
                     0)
                   (if (and (or (equal? ty "V") (equal? ty "I"))
                            (not (number? val)))

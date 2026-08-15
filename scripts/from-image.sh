@@ -116,18 +116,21 @@ for c in comps:
     n2 = c.get("n2", 0)
     n3 = c.get("n3", 0)
     val = c.get("value", 0)
-    if isinstance(val, str):
-        vlit = json.dumps(val)
-    else:
-        vlit = str(val)
+    vlit = json.dumps(val) if isinstance(val, str) else str(val)
     if ty == "Q":
-        lines.append(
-            f'  (daed:ir-comp3 {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {n3} {vlit})'
-        )
+        core = f'(daed:ir-comp3 {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {n3} {vlit})'
     else:
-        lines.append(
-            f'  (daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
-        )
+        core = f'(daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
+    params = c.get("params") if isinstance(c.get("params"), dict) else None
+    if params:
+        lines.append(f"  (let ((c {core}) (p (hash)))")
+        for k, v in params.items():
+            vlitp = json.dumps(v) if isinstance(v, str) else v
+            lines.append(f'    (hash-set! p {json.dumps(str(k))} {vlitp})')
+        lines.append('    (hash-set! c "params" p)')
+        lines.append("    c)")
+    else:
+        lines.append("  " + core)
 lines.append("))")
 lines.append('(display "=== IR comps ===") (newline)')
 for c in comps:

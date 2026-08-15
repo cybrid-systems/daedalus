@@ -12,11 +12,15 @@ no `<think>` block — the first character of the reply must be `{`.
 Rules:
 
 - Components: `R` `C` `L` `V` `I` `D` `Q` (NPN). Skip unknown ICs.
-- LED / LED1 / 发光二极管 → type `D` (anode=`n1`, cathode=`n2`). Value `1e-14`.
+- LED / LED1 / 发光二极管 → type `D` (anode=`n1`, cathode=`n2`).
+  `value` is the printed color (`red`/`green`/`yellow`), **not** `1e-14`.
+  Put `Is` in `params` if needed (`{"Is": 1e-14}`).
   In this textbook chaser the LED anode faces the battery plus (VCC);
   cathode faces the collector through the 100 Ω resistor.
 - Transistor labels like `V1`/`V2`/`9013`/`8050`/`9014`/`2N3904` → type `Q`
-  (NPN). `n1`=collector, `n2`=base, `n3`=emitter. Value `1e-15`.
+  (NPN). `n1`=collector, `n2`=base, `n3`=emitter.
+  `value` is the printed type (`9013`), **not** `1e-15`.
+  Put `Is` in `params` (`{"Is": 1e-15}`).
   Common-emitter stages (this textbook style): **every emitter is node 0**.
   Do **not** chain one emitter into the next base. Stage coupling is only
   via capacitors (collector of one → base of next).

@@ -29,12 +29,19 @@ whether a circuit is runnable.
 | `n3` | int | Q / E / G | Emitter (Q) or control + (E, G) |
 | `n4` | int | E / G | Control − |
 | `ctrl` | string | F / H | Name of V/E/H whose current is sensed |
-| `value` | number / string | yes | SI value or engineering string (`1k`, `2.2uF`) |
+| `value` | number / string | yes | What is **printed on the schematic**: `10k`, `100uF`, `3V`, transistor type `9013`, LED color `red`. Not a fake `Is`. |
 | `unit` | string | no | Hint: `ohm` `F` `H` `V` `A` |
-| `params` | hash | no | `n` `vt` `bf` `br` `gmin` `Is` |
+| `params` | hash | no | Simulator cards: `Is` `n` `vt` `bf` `br` `gmin`. Q/D `Is` lives here (default 1e-15 / 1e-14). |
 | `conf` | number | no | Extractor confidence `0..1` |
 
 Node `0` is GND. Extractors may use `"GND"` / `"gnd"`; conversion maps those to `0`.
+
+**Topology.** `n1`/`n2`/`n3` are terminal-to-node pins. The same integer means the same net (wires join). That *is* the netlist:
+
+- R/C/L/V/I/D: `n1`–`n2` (V: plus/minus; D: anode/cathode)
+- Q: `n1`=collector, `n2`=base, `n3`=emitter
+
+This circuit is fully described by those pins. Geometry and textbook rotation are not stored.
 
 ## Conversion
 

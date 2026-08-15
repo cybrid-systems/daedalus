@@ -279,17 +279,39 @@ def normalize_ir(obj: dict) -> dict:
         if ty == "LED" or _looks_led(c):
             c = dict(c)
             c["type"] = "D"
-            val = str(c.get("value", "")).lower()
-            if val in ("", "0", "led", "red", "green", "yellow", "blue"):
-                c["value"] = 1e-14
+            p = dict(c.get("params") or {})
+            ev = _eng(c.get("value"))
+            if ev is not None and 0 < ev < 1e-6:
+                p.setdefault("Is", ev)
+                color = "red"
+                nm = str(c.get("name", "")).upper()
+                if nm.endswith("2"):
+                    color = "green"
+                elif nm.endswith("3"):
+                    color = "yellow"
+                c["value"] = color
+            else:
+                p.setdefault("Is", 1e-14)
+                raw = str(c.get("value", "")).strip()
+                if raw.lower() in ("", "0", "led", "1e-14", "1e-15"):
+                    c["value"] = "LED"
+            c["params"] = p
         elif ty in ("Q",) or (ty == "V" and _looks_bjt(c)):
             c = dict(c)
             c["type"] = "Q"
             if "n3" not in c:
                 c["n3"] = c.get("ne", 0)
-            val = str(c.get("value", ""))
-            if val in ("", "9013", "9014", "8050", "2N3904"):
-                c["value"] = 1e-15
+            p = dict(c.get("params") or {})
+            ev = _eng(c.get("value"))
+            if ev is not None and 0 < ev < 1e-6:
+                p.setdefault("Is", ev)
+                c["value"] = "9013"
+            else:
+                p.setdefault("Is", 1e-15)
+                raw = str(c.get("value", "")).strip()
+                if raw in ("", "1e-15", "1e-14"):
+                    c["value"] = "9013"
+            c["params"] = p
         elif ty in VALID_TYPES:
             c = dict(c)
             c["type"] = ty
@@ -454,6 +476,30 @@ def validate_ir(obj: object) -> list[str]:
     return errs
 
 
+def _aura_comp(c: dict) -> str:
+    ty = c.get("type", "R")
+    nm = c.get("name", "x")
+    n1 = c.get("n1", 0)
+    n2 = c.get("n2", 0)
+    n3 = c.get("n3", 0)
+    val = c.get("value", 0)
+    vlit = json.dumps(val) if isinstance(val, str) else str(val)
+    if ty == "Q":
+        core = f'(daed:ir-comp3 {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {n3} {vlit})'
+    else:
+        core = f'(daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
+    params = c.get("params")
+    if not isinstance(params, dict) or not params:
+        return "  " + core
+    lines = [f"  (let ((c {core}) (p (hash)))"]
+    for k, v in params.items():
+        vlitp = json.dumps(v) if isinstance(v, str) else v
+        lines.append(f'    (hash-set! p {json.dumps(str(k))} {vlitp})')
+    lines.append('    (hash-set! c "params" p)')
+    lines.append("    c)")
+    return "\n".join(lines)
+
+
 def ir_to_aura(obj: dict) -> str:
     title = obj.get("title") or "extracted"
     lines = [
@@ -462,21 +508,7 @@ def ir_to_aura(obj: dict) -> str:
         '(hash-set! ir "comps" (list',
     ]
     for c in obj.get("comps") or []:
-        ty = c.get("type", "R")
-        nm = c.get("name", "x")
-        n1 = c.get("n1", 0)
-        n2 = c.get("n2", 0)
-        n3 = c.get("n3", 0)
-        val = c.get("value", 0)
-        vlit = json.dumps(val) if isinstance(val, str) else str(val)
-        if ty == "Q":
-            lines.append(
-                f'  (daed:ir-comp3 {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {n3} {vlit})'
-            )
-        else:
-            lines.append(
-                f'  (daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
-            )
+        lines.append(_aura_comp(c))
     lines += [
         "))",
         "(define r (daed:from-ir ir 12))",
@@ -561,6 +593,8 @@ def main() -> None:
         "Use only labels printed on the drawing: BT, V1, V2, V3, LED1, LED2, LED3, "
         "R1–R6, C1, C2, C3. Do not invent Cwrap or extra parts. "
         "C1=C2=C3=100uF exactly as written. "
+        "V1/V2/V3 value is 9013 (not 1e-15); LED value is red/green/yellow (not 1e-14). "
+        "Put Is in params only. "
         "V1/V2/V3 are 9013 NPN (n1=C n2=B n3=E); emitters all node 0. "
         "10k is base-to-VCC; 100Ω is LED series; LED anode on VCC. "
         "Caps couple collector → next base, including C1 wrap last→first. "

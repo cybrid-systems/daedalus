@@ -182,10 +182,10 @@
         ((equal? ty "V") (set! out (daed:V nm n1 n2 val)))
         ((equal? ty "I") (set! out (daed:I nm n1 n2 val)))
         ((equal? ty "D") (set! out (daed:D* nm n1 n2
-                                           (if (> val 0.0) val 1e-14)
+                                           (if (and (> val 0.0) (< val 1e-6)) val 1e-14)
                                            1.0 0.026)))
         ((equal? ty "Q") (set! out (daed:Q* nm n1 n2 n3
-                                           (if (> val 0.0) val 1e-15)
+                                           (if (and (> val 0.0) (< val 1e-6)) val 1e-15)
                                            100.0 1.0 0.026)))
         ((equal? ty "M") (set! out (daed:M* nm n1 n2 n3
                                            (if (> val 0.0) val 2e-4)
