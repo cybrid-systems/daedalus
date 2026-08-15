@@ -43,6 +43,7 @@ required=(
   "lib/mutate-circuit.aura"
   "lib/agent.aura"
   "lib/viz.aura"
+  "lib/schematic.aura"
   "lib/devices.aura"
   "lib/ir.aura"
   "lib/validate.aura"

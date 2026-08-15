@@ -1,0 +1,24 @@
+; Draw a schematic HTML from ingested IR (no edit-back preview).
+;
+; Run: ./scripts/run-aura.sh examples/10-vision-pipeline/schematic.aura
+
+(require "daedalus-min" all:)
+
+(define ir
+  (daed:ir-ingest "examples/10-vision-pipeline/out/3led.minimax.json"))
+
+(if (not ir)
+  (set! ir (daed:ir-ingest "examples/10-vision-pipeline/fixtures/3led.minimax.json"))
+  0)
+
+(define html (daed:ir->schematic-html ir))
+(define n (write-file "examples/10-vision-pipeline/out/3led.html" html))
+(display "title=") (display (daed:ir-title ir))
+(display " comps=") (display (length (daed:ir-comps ir)))
+(display " html=") (display n)
+(display " bytes=") (display (string-length html))
+(newline)
+(if (and (number? n) (> n 0) (daed:string-has? html "<svg")
+         (daed:string-has? html "V1"))
+  (begin (display "RESULT pass example=schematic") (newline))
+  (begin (display "RESULT fail example=schematic") (newline)))

@@ -176,7 +176,8 @@
         daed:fixture-register! daed:fixture-lookup daed:install-builtin-fixtures!
         daed:basename daed:from-ir daed:from-image
         daed:pipe-ok? daed:pipe-circuit daed:pipe-sim daed:pipe-html
-        daed:pipe-trace daed:pipe-reason)
+        daed:pipe-trace daed:pipe-reason
+        daed:sch-version daed:ir->schematic-html daed:circuit->schematic-html)
 
 (require "netlist" all:)
 (require "stamp" all:)
@@ -196,6 +197,7 @@
 (require "topo" all:)
 (require "spice" all:)
 (require "viz" all:)
+(require "schematic" all:)
 (require "ir" all:)
 (require "validate" all:)
 (require "repair" all:)

@@ -1,0 +1,382 @@
+; lib/schematic.aura — IR / circuit → schematic HTML (no edit-back)
+;
+; Rails + NPN stages + 2-terminal symbols. Layout is generic: VCC/GND
+; rails, one column per Q, leftover nodes near their neighbors.
+
+(export daed:sch-version
+        daed:ir->schematic-html
+        daed:circuit->schematic-html)
+
+(require "netlist" all:)
+(require "ir" all:)
+
+(define daed:sch-version 1)
+
+(define (daed:sch-s x)
+  (if (number? x) (number->string x) (if (string? x) x "")))
+
+(define (daed:sch-key n)
+  (number->string (if (number? n) n 0)))
+
+(define (daed:sch-get h n)
+  (hash-ref h (daed:sch-key n) #f))
+
+(define (daed:sch-set! h n v)
+  (hash-set! h (daed:sch-key n) v))
+
+(define (daed:sch-has? h n)
+  (number? (daed:sch-get h n)))
+
+(define (daed:sch-qs comps)
+  (let ((acc '()))
+    (let loop ((cs comps))
+      (if (null? cs)
+        (reverse acc)
+        (begin
+          (if (equal? (hash-ref (car cs) "type" "") "Q")
+            (set! acc (cons (car cs) acc))
+            0)
+          (loop (cdr cs)))))))
+
+(define (daed:sch-first-v comps)
+  (let ((found #f))
+    (let loop ((cs comps))
+      (if (or found (null? cs))
+        found
+        (begin
+          (if (equal? (hash-ref (car cs) "type" "") "V")
+            (set! found (car cs))
+            0)
+          (loop (cdr cs)))))))
+
+(define (daed:sch-place comps)
+  (let ((xs (hash))
+        (ys (hash))
+        (v (daed:sch-first-v comps))
+        (vcc 1)
+        (gnd 0)
+        (qs (daed:sch-qs comps))
+        (i 0)
+        (nq 0))
+    (if v
+      (begin
+        (set! vcc (hash-ref v "n1" 1))
+        (set! gnd (hash-ref v "n2" 0)))
+      0)
+    (set! nq (length qs))
+    (if (< nq 1) (set! nq 1) 0)
+    (daed:sch-set! ys vcc 48)
+    (daed:sch-set! ys gnd 372)
+    (daed:sch-set! xs vcc 40)
+    (daed:sch-set! xs gnd 40)
+    (let loop ((cs qs))
+      (if (null? cs)
+        0
+        (let ((q (car cs))
+              (xc (+ 130 (* i 200))))
+          (daed:sch-set! xs (hash-ref q "n1" 0) xc)
+          (daed:sch-set! ys (hash-ref q "n1" 0) 168)
+          (daed:sch-set! xs (hash-ref q "n2" 0) (- xc 52))
+          (daed:sch-set! ys (hash-ref q "n2" 0) 214)
+          (if (not (or (equal? (hash-ref q "n3" 0) vcc)
+                       (equal? (hash-ref q "n3" 0) gnd)))
+            (begin
+              (daed:sch-set! xs (hash-ref q "n3" 0) xc)
+              (daed:sch-set! ys (hash-ref q "n3" 0) 268))
+            0)
+          (set! i (+ i 1))
+          (loop (cdr cs)))))
+    (let loop2 ((cs comps))
+      (if (null? cs)
+        0
+        (let ((c (car cs))
+              (ty "")
+              (a 0)
+              (b 0))
+          (set! ty (hash-ref c "type" ""))
+          (set! a (hash-ref c "n1" 0))
+          (set! b (hash-ref c "n2" 0))
+          (if (and (or (equal? ty "D") (equal? ty "R") (equal? ty "C"))
+                   (equal? a vcc)
+                   (not (daed:sch-has? xs b)))
+            (begin
+              (daed:sch-set! xs b (daed:sch-guess-x xs comps b vcc gnd))
+              (daed:sch-set! ys b 108))
+            0)
+          (if (and (or (equal? ty "D") (equal? ty "R") (equal? ty "C"))
+                   (equal? b vcc)
+                   (not (daed:sch-has? xs a)))
+            (begin
+              (daed:sch-set! xs a (daed:sch-guess-x xs comps a vcc gnd))
+              (daed:sch-set! ys a 108))
+            0)
+          (loop2 (cdr cs)))))
+    (let loop3 ((cs comps))
+      (if (null? cs)
+        0
+        (let ((c (car cs)))
+          (daed:sch-ensure-node xs ys (hash-ref c "n1" 0) vcc gnd)
+          (daed:sch-ensure-node xs ys (hash-ref c "n2" 0) vcc gnd)
+          (if (hash-ref c "n3" #f)
+            (daed:sch-ensure-node xs ys (hash-ref c "n3" 0) vcc gnd)
+            0)
+          (loop3 (cdr cs)))))
+    (list xs ys vcc gnd nq)))
+
+(define (daed:sch-guess-x xs comps n vcc gnd)
+  (let ((x 130))
+    (let loop ((cs comps))
+      (if (null? cs)
+        x
+        (let ((c (car cs))
+              (ty (hash-ref (car cs) "type" "")))
+          (if (and (or (equal? ty "R") (equal? ty "C") (equal? ty "D"))
+                   (or (equal? (hash-ref c "n1" -1) n)
+                       (equal? (hash-ref c "n2" -1) n)))
+            (let ((o (if (equal? (hash-ref c "n1" -1) n)
+                       (hash-ref c "n2" 0)
+                       (hash-ref c "n1" 0))))
+              (if (and (daed:sch-has? xs o)
+                       (not (equal? o vcc))
+                       (not (equal? o gnd)))
+                (set! x (daed:sch-get xs o))
+                0))
+            0)
+          (loop (cdr cs)))))
+    x))
+
+(define (daed:sch-ensure-node xs ys n vcc gnd)
+  (if (or (equal? n vcc) (equal? n gnd) (daed:sch-has? xs n))
+    0
+    (begin
+      (daed:sch-set! xs n (+ 80 (* n 36)))
+      (daed:sch-set! ys n 220))))
+
+(define (daed:sch-line x1 y1 x2 y2)
+  (string-append
+    "<line x1=\"" (daed:sch-s x1) "\" y1=\"" (daed:sch-s y1)
+    "\" x2=\"" (daed:sch-s x2) "\" y2=\"" (daed:sch-s y2)
+    "\" stroke=\"#111\" stroke-width=\"1.6\"/>"))
+
+(define (daed:sch-dot x y)
+  (string-append
+    "<circle cx=\"" (daed:sch-s x) "\" cy=\"" (daed:sch-s y)
+    "\" r=\"2.4\" fill=\"#111\"/>"))
+
+(define (daed:sch-text x y s)
+  (string-append
+    "<text x=\"" (daed:sch-s x) "\" y=\"" (daed:sch-s y)
+    "\" font-size=\"11\" font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
+    s "</text>"))
+
+(define (daed:sch-lab c)
+  (let ((ty (hash-ref c "type" ""))
+        (nm (hash-ref c "name" ""))
+        (val (hash-ref c "value" "")))
+    (string-append nm
+      (if (or (equal? val "") (not val))
+        ""
+        (string-append " " (daed:sch-s val))))))
+
+(define (daed:sch-sym-R x y vert)
+  (if vert
+    (string-append
+      "<rect x=\"" (daed:sch-s (- x 7)) "\" y=\"" (daed:sch-s (- y 16))
+      "\" width=\"14\" height=\"32\" fill=\"#fff\" stroke=\"#111\" stroke-width=\"1.5\"/>")
+    (string-append
+      "<rect x=\"" (daed:sch-s (- x 16)) "\" y=\"" (daed:sch-s (- y 7))
+      "\" width=\"32\" height=\"14\" fill=\"#fff\" stroke=\"#111\" stroke-width=\"1.5\"/>")))
+
+(define (daed:sch-sym-C x y vert)
+  (if vert
+    (string-append
+      (daed:sch-line (- x 10) (- y 4) (+ x 10) (- y 4))
+      (daed:sch-line (- x 10) (+ y 4) (+ x 10) (+ y 4)))
+    (string-append
+      (daed:sch-line (- x 4) (- y 10) (- x 4) (+ y 10))
+      (daed:sch-line (+ x 4) (- y 10) (+ x 4) (+ y 10)))))
+
+(define (daed:sch-sym-D x y vert down led col)
+  (let ((tri "")
+        (bar "")
+        (arr ""))
+    (if vert
+      (if down
+        (begin
+          (set! tri (string-append
+            "<polygon points=\""
+            (daed:sch-s x) "," (daed:sch-s (+ y 8)) " "
+            (daed:sch-s (- x 8)) "," (daed:sch-s (- y 6)) " "
+            (daed:sch-s (+ x 8)) "," (daed:sch-s (- y 6))
+            "\" fill=\"" col "\" stroke=\"#111\"/>"))
+          (set! bar (daed:sch-line (- x 8) (+ y 8) (+ x 8) (+ y 8))))
+        (begin
+          (set! tri (string-append
+            "<polygon points=\""
+            (daed:sch-s x) "," (daed:sch-s (- y 8)) " "
+            (daed:sch-s (- x 8)) "," (daed:sch-s (+ y 6)) " "
+            (daed:sch-s (+ x 8)) "," (daed:sch-s (+ y 6))
+            "\" fill=\"" col "\" stroke=\"#111\"/>"))
+          (set! bar (daed:sch-line (- x 8) (- y 8) (+ x 8) (- y 8)))))
+      (begin
+        (set! tri (string-append
+          "<polygon points=\""
+          (daed:sch-s (+ x 8)) "," (daed:sch-s y) " "
+          (daed:sch-s (- x 6)) "," (daed:sch-s (- y 8)) " "
+          (daed:sch-s (- x 6)) "," (daed:sch-s (+ y 8))
+          "\" fill=\"" col "\" stroke=\"#111\"/>"))
+        (set! bar (daed:sch-line (+ x 8) (- y 8) (+ x 8) (+ y 8)))))
+    (if led
+      (set! arr (string-append
+        "<path d=\"M " (daed:sch-s (+ x 10)) " " (daed:sch-s (- y 10))
+        " l 8 -6\" stroke=\"#111\" fill=\"none\"/>"
+        "<path d=\"M " (daed:sch-s (+ x 12)) " " (daed:sch-s (- y 4))
+        " l 8 -6\" stroke=\"#111\" fill=\"none\"/>"))
+      0)
+    (string-append tri bar arr)))
+
+(define (daed:sch-led-color val)
+  (if (or (equal? val "red") (equal? val "RED"))
+    "#e11d48"
+    (if (or (equal? val "green") (equal? val "GREEN"))
+      "#16a34a"
+      (if (or (equal? val "yellow") (equal? val "YELLOW"))
+        "#ca8a04"
+        "#fb923c"))))
+
+(define (daed:sch-sym-Q x y)
+  (string-append
+    "<circle cx=\"" (daed:sch-s x) "\" cy=\"" (daed:sch-s y)
+    "\" r=\"16\" fill=\"#fff\" stroke=\"#111\" stroke-width=\"1.4\"/>"
+    (daed:sch-line (- x 16) y (- x 4) y)
+    (daed:sch-line (- x 4) (- y 10) (- x 4) (+ y 10))
+    (daed:sch-line (- x 4) (- y 4) x (- y 16))
+    (daed:sch-line (- x 4) (+ y 4) x (+ y 16))
+    "<polygon points=\""
+    (daed:sch-s (- x 1)) "," (daed:sch-s (+ y 8)) " "
+    (daed:sch-s (+ x 5)) "," (daed:sch-s (+ y 16)) " "
+    (daed:sch-s (- x 4)) "," (daed:sch-s (+ y 14))
+    "\" fill=\"#111\"/>"))
+
+(define (daed:sch-two xs ys c)
+  (let ((a (hash-ref c "n1" 0))
+        (b (hash-ref c "n2" 0))
+        (ty (hash-ref c "type" ""))
+        (x1 0) (y1 0) (x2 0) (y2 0)
+        (mx 0) (my 0) (vert #t))
+    (if (or (not (daed:sch-has? xs a)) (not (daed:sch-has? xs b)))
+      ""
+      (begin
+        (set! x1 (daed:sch-get xs a))
+        (set! y1 (daed:sch-get ys a))
+        (set! x2 (daed:sch-get xs b))
+        (set! y2 (daed:sch-get ys b))
+        (set! mx (/ (+ x1 x2) 2.0))
+        (set! my (/ (+ y1 y2) 2.0))
+        (set! vert (> (abs (- y2 y1)) (abs (- x2 x1))))
+        (string-append
+          (daed:sch-line x1 y1 mx my)
+          (daed:sch-line mx my x2 y2)
+          (if (equal? ty "R")
+            (daed:sch-sym-R mx my vert)
+            (if (equal? ty "C")
+              (daed:sch-sym-C mx my vert)
+              (if (equal? ty "D")
+                (daed:sch-sym-D mx my vert (> y2 y1) #t
+                                (daed:sch-led-color (hash-ref c "value" "")))
+                "")))
+          (daed:sch-text (+ mx 12) (- my 8) (daed:sch-lab c)))))))
+
+(define (daed:sch-q xs ys c vcc gnd)
+  (let ((nc (hash-ref c "n1" 0))
+        (nb (hash-ref c "n2" 0))
+        (ne (hash-ref c "n3" 0))
+        (xc 0) (yc 214))
+    (if (not (daed:sch-has? xs nc))
+      ""
+      (begin
+        (set! xc (daed:sch-get xs nc))
+        (string-append
+          (daed:sch-sym-Q xc yc)
+          (daed:sch-line xc (- yc 16) xc (daed:sch-get ys nc))
+          (daed:sch-dot xc (daed:sch-get ys nc))
+          (daed:sch-line (- xc 16) yc
+                        (if (daed:sch-has? xs nb) (daed:sch-get xs nb) (- xc 52))
+                        (if (daed:sch-has? ys nb) (daed:sch-get ys nb) yc))
+          (daed:sch-line xc (+ yc 16) xc
+                        (if (equal? ne gnd) 372 (if (daed:sch-has? ys ne) (daed:sch-get ys ne) 300)))
+          (daed:sch-text (+ xc 20) (+ yc 4)
+                        (string-append (hash-ref c "name" "Q") " "
+                                       (daed:sch-s (hash-ref c "value" ""))))))))))
+
+(define (daed:sch-svg ir)
+  (let ((comps (daed:ir-comps ir))
+        (pl #f)
+        (xs #f)
+        (ys #f)
+        (vcc 1)
+        (gnd 0)
+        (nq 1)
+        (w 700)
+        (h 420)
+        (acc ""))
+    (set! pl (daed:sch-place comps))
+    (set! xs (car pl))
+    (set! ys (car (cdr pl)))
+    (set! vcc (car (cdr (cdr pl))))
+    (set! gnd (car (cdr (cdr (cdr pl)))))
+    (set! nq (car (cdr (cdr (cdr (cdr pl))))))
+    (set! w (+ 80 (* nq 200)))
+    (if (< w 420) (set! w 420) 0)
+    (set! acc
+      (string-append
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
+        (daed:sch-s w) " " (daed:sch-s h)
+        "\" width=\"100%\" class=\"schematic\">"
+        "<rect width=\"100%\" height=\"100%\" fill=\"#fffaf0\"/>"
+        (daed:sch-line 36 48 (- w 24) 48)
+        (daed:sch-line 36 372 (- w 24) 372)
+        (daed:sch-text 40 40 "VCC")
+        (daed:sch-text 40 392 "GND")
+        ; battery at left
+        (daed:sch-line 36 48 36 372)
+        (daed:sch-line 20 170 52 170)
+        (daed:sch-line 28 182 44 182)
+        (daed:sch-line 20 194 52 194)
+        (daed:sch-line 28 206 44 206)
+        (daed:sch-text 8 188 "BT")
+        (daed:sch-text 8 202 (daed:sch-s (hash-ref (if (daed:sch-first-v comps) (daed:sch-first-v comps) (hash)) "value" "V")))))
+    (let loop ((cs comps))
+      (if (null? cs)
+        0
+        (begin
+          (let ((c (car cs))
+                (ty (hash-ref (car cs) "type" "")))
+            (if (equal? ty "Q")
+              (set! acc (string-append acc (daed:sch-q xs ys c vcc gnd)))
+              (if (equal? ty "V")
+                0
+                (set! acc (string-append acc (daed:sch-two xs ys c))))))
+          (loop (cdr cs)))))
+    (string-append acc "</svg>")))
+
+(define (daed:ir->schematic-html ir)
+  (let ((title (daed:ir-title ir)))
+    (string-append
+      "<!DOCTYPE html>\n<html lang=\"zh\">\n<head>\n"
+      "<meta charset=\"utf-8\"/>\n"
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+      "<title>" title "</title>\n"
+      "<style>\n"
+      "body{margin:0;padding:1.25rem;background:#f4efe4;color:#1c1917;"
+      "font-family:ui-sans-serif,system-ui,sans-serif;}\n"
+      "h1{font-size:1.15rem;font-weight:600;margin:0 0 .75rem;}\n"
+      ".schematic{max-width:960px;border:1px solid #d6d3d1;border-radius:8px;"
+      "background:#fffaf0;display:block;}\n"
+      "</style>\n</head>\n<body>\n"
+      "<h1>" title "</h1>\n"
+      (daed:sch-svg ir)
+      "\n</body>\n</html>\n")))
+
+(define (daed:circuit->schematic-html ckt)
+  (daed:ir->schematic-html (daed:circuit->ir ckt)))
