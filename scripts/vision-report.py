@@ -171,9 +171,14 @@ def q_traces(ir: dict) -> list[dict]:
         color = TRACE_FALLBACK[i % len(TRACE_FALLBACK)]
         if i < len(ds):
             color = LED_COLORS.get(str(ds[i].get("value", "")).lower(), color)
+        qname = str(q.get("name") or "Q")
         node = q.get("n1")
+        vc = f"VC{qname[1:]}" if len(qname) > 1 and qname[0] in "Vv" else f"{qname}.C"
+        led = str(ds[i].get("name") or "") if i < len(ds) else ""
         out.append({
-            "name": str(q.get("name") or "Q"),
+            "name": vc,
+            "q": qname,
+            "led": led,
             "col": f"v{node}",
             "node": node,
             "color": color,
@@ -269,10 +274,15 @@ def build_report(
             f'<circle class="probe" data-name="{esc(tr["name"])}" r="4.2" '
             f'fill="{tr["color"]}" stroke="#fff" stroke-width="1.2" cx="-20" cy="-20"/>'
         )
+        qn = esc(str(tr.get("q") or ""))
+        led = esc(str(tr.get("led") or ""))
+        nid = tr.get("node")
+        sub = " · ".join(x for x in (qn, f"n{nid}" if nid is not None else "", led) if x)
         legend.append(
             f'<label class="lg"><input type="checkbox" checked data-trace="{esc(tr["name"])}"/>'
             f'<span class="sw" style="background:{tr["color"]}"></span>'
-            f'{esc(tr["name"])} <span class="live" data-live="{esc(tr["name"])}">—</span></label>'
+            f'{esc(tr["name"])} <span class="live" data-live="{esc(tr["name"])}">—</span>'
+            f'<em>{sub}</em></label>'
         )
         wave_traces.append({
             "name": tr["name"],
@@ -356,12 +366,8 @@ __GRID__
 <g id="probes">__DOTS__</g>
 </svg>
 <div class="legend">__LEGEND__</div>
-<p class="hint">__NUDGE__Playback is the recorded .tran (not a live solver). 1× is one sim-second per wall-second. LEDs on the schematic follow collector voltage (low = on).</p>
+<p class="hint">__NUDGE__V1/V2/V3 are the 9013 transistors. VC1 is V1's collector voltage (same name on the plot; IR node listed as n…). That LED lights when its VC is low.</p>
 </div>
-<details class="card" style="margin-top:1rem">
-<summary>Aura log</summary>
-<pre>__LOG__</pre>
-</details>
 <script type="application/json" id="wave-data">__WAVE__</script>
 <script>
 (function(){
@@ -512,7 +518,6 @@ __GRID__
         .replace("__DOTS__", "".join(dots))
         .replace("__LEGEND__", "".join(legend))
         .replace("__NUDGE__", esc(nudge_note))
-        .replace("__LOG__", esc(aura_log))
         .replace("__WAVE__", wave_json)
     )
 

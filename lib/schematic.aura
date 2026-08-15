@@ -185,14 +185,26 @@
     "\" font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
     s "</text>"))
 
-; Voltage node label at the collector junction (V1/V2/V3 = probe points).
-(define (daed:sch-vnode xc yc name)
+; Collector voltage probe: VC1 at V1.C, plus IR node id (n3).
+(define (daed:sch-vc-name qname)
+  (if (and (string? qname)
+           (> (string-length qname) 1)
+           (equal? (substring qname 0 1) "V"))
+    (string-append "VC" (substring qname 1 (string-length qname)))
+    (string-append qname ".C")))
+
+(define (daed:sch-vnode xc yc vname node)
   (string-append
-    "<text class=\"vnode\" data-trace=\"" name
-    "\" x=\"" (daed:sch-s (- xc 8)) "\" y=\"" (daed:sch-s (- yc 8))
+    "<text class=\"vnode\" data-trace=\"" vname
+    "\" x=\"" (daed:sch-s (- xc 8)) "\" y=\"" (daed:sch-s (- yc 10))
     "\" text-anchor=\"end\" font-size=\"13\" font-weight=\"700\" "
     "font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#111\">"
-    name "</text>"))
+    vname "</text>"
+    "<text class=\"nlabel\" x=\"" (daed:sch-s (- xc 8)) "\" y=\""
+    (daed:sch-s (+ yc 6))
+    "\" text-anchor=\"end\" font-size=\"10\" "
+    "font-family=\"ui-sans-serif,system-ui,sans-serif\" fill=\"#57534e\">n"
+    (daed:sch-s node) "</text>"))
 
 (define (daed:sch-lab c)
   (let ((nm (hash-ref c "name" ""))
@@ -435,8 +447,12 @@
           (daed:sch-dot xb daed:sch-yq)
           (daed:sch-line xc (+ daed:sch-yq 18) xc daed:sch-ygnd)
           (daed:sch-dot xc daed:sch-ygnd)
-          (daed:sch-vnode xc daed:sch-yc (hash-ref c "name" "Q"))
-          (daed:sch-text-at (+ xc 22) (+ daed:sch-yq 4)
+          (daed:sch-vnode xc daed:sch-yc
+                         (daed:sch-vc-name (hash-ref c "name" "Q"))
+                         nc)
+          (daed:sch-text-at (+ xc 22) (- daed:sch-yq 8)
+                           (hash-ref c "name" "Q") 13 "700")
+          (daed:sch-text-at (+ xc 22) (+ daed:sch-yq 8)
                            (daed:sch-s (hash-ref c "value" "")) 11 "400")))))))
 
 (define (daed:sch-svg ir)
