@@ -451,7 +451,7 @@
                          (daed:sch-vc-name (hash-ref c "name" "Q"))
                          nc)
           (daed:sch-text-at (+ xc 22) (- daed:sch-yq 8)
-                           (hash-ref c "name" "Q") 13 "700")
+                           (hash-ref c "name" "Q") 13 "400")
           (daed:sch-text-at (+ xc 22) (+ daed:sch-yq 8)
                            (daed:sch-s (hash-ref c "value" "")) 11 "400")))))))
 
