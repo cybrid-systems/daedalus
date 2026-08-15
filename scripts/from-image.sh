@@ -95,137 +95,55 @@ if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
   fi
   echo "from-image: IR json copy=${OUT_DIR}/${STEM}.json" >&2
   cat "$JSON"
-  python3 - "$JSON" "$DRIVER" "$STEM" "$PHOTO_NAME" "$HTML_REL" <<'PY'
-import json, sys
-from pathlib import Path
-obj = json.loads(Path(sys.argv[1]).read_text())
-title = obj.get("title") or "extracted"
-comps = obj.get("comps") or []
-stem = sys.argv[3] if len(sys.argv) > 3 else "extracted"
-photo = sys.argv[4] if len(sys.argv) > 4 else ""
-html_rel = sys.argv[5] if len(sys.argv) > 5 else f"examples/10-vision-pipeline/out/{stem}.html"
-lines = [
-    '(require "daedalus-min" all:)',
-    f'(define ir (daed:ir-new {json.dumps(title)}))',
-    "(hash-set! ir \"comps\" (list",
-]
-for c in comps:
-    ty = c.get("type", "R")
-    nm = c.get("name", "x")
-    n1 = c.get("n1", 0)
-    n2 = c.get("n2", 0)
-    n3 = c.get("n3", 0)
-    val = c.get("value", 0)
-    vlit = json.dumps(val) if isinstance(val, str) else str(val)
-    if ty == "Q":
-        core = f'(daed:ir-comp3 {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {n3} {vlit})'
-    else:
-        core = f'(daed:ir-comp {json.dumps(ty)} {json.dumps(nm)} {n1} {n2} {vlit})'
-    params = c.get("params") if isinstance(c.get("params"), dict) else None
-    if params:
-        lines.append(f"  (let ((c {core}) (p (hash)))")
-        for k, v in params.items():
-            vlitp = json.dumps(v) if isinstance(v, str) else v
-            lines.append(f'    (hash-set! p {json.dumps(str(k))} {vlitp})')
-        lines.append('    (hash-set! c "params" p)')
-        lines.append("    c)")
-    else:
-        lines.append("  " + core)
-lines.append("))")
-lines.append('(display "=== IR comps ===") (newline)')
-for c in comps:
-    extra = f" n3={c.get('n3')}" if c.get("type") == "Q" else ""
-    row = (
-        f"  {c.get('type')} {c.get('name')} "
-        f"n1={c.get('n1')} n2={c.get('n2')}{extra} ={c.get('value')}"
-    )
-    lines.append(f"(display {json.dumps(row)}) (newline)")
-lines += [
-    "(define r (daed:from-ir ir 12))",
-    '(display "source=vlm ok=")',
-    "(display (daed:pipe-ok? r))",
-    '(display " reason=")',
-    "(display (daed:pipe-reason r))",
-    "(newline)",
-    "(define ckt (daed:pipe-circuit r))",
-    "(define sim (daed:pipe-sim r))",
-    '(display "=== SPICE ===") (newline)',
-    "(display (daed:circuit->spice ckt))",
-    '(display "=== .op labels ===") (newline)',
-]
-
-# Schematic labels: V1/V2/V3 = transistor collectors, then BT.
-labels = []
-for c in comps:
-    if c.get("type") == "Q" and c.get("name"):
-        labels.append((str(c["name"]), int(c.get("n1", 0))))
-for c in comps:
-    if c.get("type") == "V" and c.get("name"):
-        labels.append((str(c["name"]), int(c.get("n1", 0))))
-if not labels:
-    labels = [("n1", 1), ("n2", 2)]
-for nm, node in labels:
-    lines += [
-        f'(display {json.dumps(nm + "=")})',
-        f"(display (daed:v sim {node}))",
-        "(newline)",
-    ]
-
-has_dyn = any(c.get("type") in ("C", "L") for c in comps)
-if has_dyn:
-    csv_path = str(Path(sys.argv[1]).with_suffix(".tran.csv"))
-    lines += [
-        '(display "note: .op treats C as open; oscillation is .tran") (newline)',
-        "(define tr (daed:simulate-tran ckt 0.1 40))",
-        '(display "=== .tran tstop=")',
-        "(display (daed:tran-tstop tr))",
-        '(display " ok=")',
-        "(display (daed:tran-ok? tr))",
-        "(newline)",
-        "(let ((ts (list 0.0 0.4 0.8 1.2 1.6 2.0 2.4 2.8 3.2 4.0)))",
-        "  (let loop ((xs ts))",
-        "    (if (null? xs) 0",
-        "      (begin",
-        '        (display "  t=") (display (car xs))',
-    ]
-    for nm, node in labels:
-        if any(c.get("name") == nm and c.get("type") == "Q" for c in comps):
-            lines += [
-                f'        (display {json.dumps(" " + nm + "=")})',
-                f"        (display (daed:tran-v-at-t tr {node} (car xs)))",
-            ]
-    lines += [
-        "        (newline)",
-        "        (loop (cdr xs))))))",
-    ]
-    for nm, node in labels:
-        if not any(c.get("name") == nm and c.get("type") == "Q" for c in comps):
-            continue
-        lines += [
-            f"(let ((mx (daed:measure-max tr {node})) (mn (daed:measure-min tr {node})))",
-            f'  (display {json.dumps("  pp " + nm + "=")})',
-            "  (display (- (daed:meas-value mx) (daed:meas-value mn)))",
-            "  (newline))",
-        ]
-    lines += [
-        f"(daed:write-tran-csv! tr {json.dumps(csv_path)})",
-        f'(display "tran csv={csv_path}") (newline)',
-    ]
-
-if photo:
-    lines.append(f'(hash-set! ckt "source-image" {json.dumps("./" + photo)})')
-lines += [
-    f"(define html (daed:circuit->html ckt sim))",
-    f"(define nw (write-file {json.dumps(html_rel)} html))",
-    '(display "html=")',
-    f"(display (if (> nw 0) {json.dumps(html_rel)} \"write-fail\"))",
-    "(newline)",
-    '(if (daed:pipe-ok? r)',
-    '  (begin (display "RESULT pass example=from-image source=vlm") (newline))',
-    '  (begin (display "RESULT fail example=from-image") (newline)))',
-]
-Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
-PY
+  cat > "$DRIVER" <<EOF
+(require "daedalus-min" all:)
+(define ir (daed:ir-ingest "$JSON"))
+(display "=== IR comps ===") (newline)
+(let loop ((cs (daed:ir-comps ir)))
+  (if (null? cs) 0
+    (begin
+      (let ((c (car cs)))
+        (display "  ") (display (hash-ref c "type" "?"))
+        (display " ") (display (hash-ref c "name" "?"))
+        (display " n1=") (display (hash-ref c "n1" "?"))
+        (display " n2=") (display (hash-ref c "n2" "?"))
+        (if (hash-ref c "n3" #f)
+          (begin (display " n3=") (display (hash-ref c "n3"))) 0)
+        (display " =") (display (hash-ref c "value" "?")) (newline))
+      (loop (cdr cs)))))
+(define r (daed:from-ir ir 12))
+(display "source=json ok=")
+(display (daed:pipe-ok? r))
+(display " reason=")
+(display (daed:pipe-reason r))
+(newline)
+(define ckt (daed:pipe-circuit r))
+(define sim (daed:pipe-sim r))
+(display "=== SPICE ===") (newline)
+(display (daed:circuit->spice ckt))
+(display "=== .op labels ===") (newline)
+(let loop ((cs (daed:ir-comps ir)))
+  (if (null? cs) 0
+    (begin
+      (let ((c (car cs)))
+        (if (or (equal? (hash-ref c "type" "") "Q")
+                (equal? (hash-ref c "type" "") "V"))
+          (begin
+            (display (hash-ref c "name" "?"))
+            (display "=")
+            (display (daed:v sim (hash-ref c "n1" 0)))
+            (newline))
+          0))
+      (loop (cdr cs)))))
+(hash-set! ckt "source-image" "./${PHOTO_NAME}")
+(define nw (write-file "$HTML_REL" (daed:circuit->html ckt sim)))
+(display "html=")
+(display (if (> nw 0) "$HTML_REL" "write-fail"))
+(newline)
+(if (daed:pipe-ok? r)
+  (begin (display "RESULT pass example=from-image source=json") (newline))
+  (begin (display "RESULT fail example=from-image") (newline)))
+EOF
   ./scripts/run-aura.sh "$DRIVER"
 else
   exit 1

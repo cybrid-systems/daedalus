@@ -1,0 +1,141 @@
+{
+  "schema": "daedalus-ir/1",
+  "title": "3-led-chaser",
+  "gnd": 0,
+  "comps": [
+    {
+      "type": "V",
+      "name": "BT",
+      "n1": 1,
+      "n2": 0,
+      "value": "3V"
+    },
+    {
+      "type": "R",
+      "name": "R1",
+      "n1": 1,
+      "n2": 2,
+      "value": "10k"
+    },
+    {
+      "type": "R",
+      "name": "R2",
+      "n1": 2,
+      "n2": 3,
+      "value": "100"
+    },
+    {
+      "type": "R",
+      "name": "R3",
+      "n1": 1,
+      "n2": 4,
+      "value": "10k"
+    },
+    {
+      "type": "R",
+      "name": "R4",
+      "n1": 4,
+      "n2": 5,
+      "value": "100"
+    },
+    {
+      "type": "R",
+      "name": "R5",
+      "n1": 1,
+      "n2": 6,
+      "value": "10k"
+    },
+    {
+      "type": "R",
+      "name": "R6",
+      "n1": 6,
+      "n2": 7,
+      "value": "100"
+    },
+    {
+      "type": "D",
+      "name": "LED1",
+      "n1": 1,
+      "n2": 3,
+      "value": "red",
+      "params": {
+        "Is": 1e-14
+      }
+    },
+    {
+      "type": "D",
+      "name": "LED2",
+      "n1": 1,
+      "n2": 5,
+      "value": "green",
+      "params": {
+        "Is": 1e-14
+      }
+    },
+    {
+      "type": "D",
+      "name": "LED3",
+      "n1": 1,
+      "n2": 7,
+      "value": "yellow",
+      "params": {
+        "Is": 1e-14
+      }
+    },
+    {
+      "type": "Q",
+      "name": "V1",
+      "n1": 2,
+      "n2": 8,
+      "n3": 0,
+      "value": "9013",
+      "params": {
+        "Is": 1e-15
+      }
+    },
+    {
+      "type": "Q",
+      "name": "V2",
+      "n1": 4,
+      "n2": 9,
+      "n3": 0,
+      "value": "9013",
+      "params": {
+        "Is": 1e-15
+      }
+    },
+    {
+      "type": "Q",
+      "name": "V3",
+      "n1": 6,
+      "n2": 10,
+      "n3": 0,
+      "value": "9013",
+      "params": {
+        "Is": 1e-15
+      }
+    },
+    {
+      "type": "C",
+      "name": "C1",
+      "n1": 6,
+      "n2": 8,
+      "value": "100uF"
+    },
+    {
+      "type": "C",
+      "name": "C2",
+      "n1": 2,
+      "n2": 9,
+      "value": "100uF"
+    },
+    {
+      "type": "C",
+      "name": "C3",
+      "n1": 4,
+      "n2": 10,
+      "value": "100uF"
+    }
+  ],
+  "notes": "Common-emitter ring oscillator: V1/V2/V3 9013 NPN emitters to GND; R1/R3/R5 = 10k base-bias from VCC; R2/R4/R6 = 100 ohm in series with LED1/2/3 anodes to VCC. Coupling: C1 collector(V3)→base(V1), C2 collector(V1)→base(V2), C3 collector(V2)→base(V3)."
+}

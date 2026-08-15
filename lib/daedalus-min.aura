@@ -160,6 +160,7 @@
         daed:ir-new daed:ir-comp daed:ir-comp3 daed:ir-add-comp!
         daed:ir-title daed:ir-gnd daed:ir-comps
         daed:ir->circuit daed:circuit->ir
+        daed:ir-ingest daed:ir-load
         daed:ir-ex-divider daed:ir-ex-rc daed:ir-ex-series-r
         daed:ir-ex-norton daed:ir-ex-diode
         daed:validate-version

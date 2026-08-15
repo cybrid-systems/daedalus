@@ -23,7 +23,7 @@
 | `mutate-circuit.aura` | 3–5 / M0 / M2 | Value + topology mutate; circuit snapshot (incl. D/Q/M / E–H) |
 | `agent.aura` | 4 | O→D→M→V→R loop + auto-tune |
 | `viz.aura` | issue #1 | Netlist → self-contained HTML/SVG + edit-back apply |
-| `ir.aura` | issue #6 | `daedalus-ir/1` + unit parse + `IR → circuit` |
+| `ir.aura` | issue #6 | `daedalus-ir/1` + `ir-ingest` (JSON/hash) + `IR → circuit` |
 | `validate.aura` | issue #6 | Static topology / semantic issues |
 | `repair.aura` | issue #6 | Snapshot-guarded repair operators + loop |
 | `vision.aura` | issue #6 | `from-ir` / `from-image` (fixture; VLM is an escape) |

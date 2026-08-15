@@ -262,6 +262,36 @@
 (display (daed:pipe-reason img-miss))
 (newline)
 
+; ── 7b. Aura ingest of VLM JSON (no Python) ──
+(define jdiv
+  (daed:ir-ingest
+    "{\"schema\":\"daedalus-ir/1\",\"title\":\"jdiv\",\"comps\":[{\"type\":\"V\",\"name\":\"vin\",\"n1\":1,\"n2\":0,\"value\":5},{\"type\":\"RESISTOR\",\"name\":\"r1\",\"n1\":1,\"n2\":2,\"value\":\"1k\"},{\"type\":\"R\",\"name\":\"r2\",\"n1\":2,\"n2\":0,\"value\":\"2k\"}]}"))
+(define r-j (daed:from-ir jdiv 4))
+(daed:stats-bump! "sim_runs")
+(define j-ok (daed:check-true (daed:pipe-ok? r-j)))
+(define j-v (daed:check-approx (daed:v (daed:pipe-sim r-j) 2) (/ 10.0 3.0) 1e-3))
+
+(define ir-3led
+  (daed:ir-load "examples/10-vision-pipeline/fixtures/3led.minimax.json"))
+(define r-3led (daed:from-ir ir-3led 12))
+(daed:stats-bump! "sim_runs")
+(define led3-ok (daed:check-true (daed:pipe-ok? r-3led)))
+(define led3-has-q (daed:check-true
+  (let ((found #f))
+    (let loop ((cs (daed:ir-comps ir-3led)))
+      (if (null? cs) found
+        (begin
+          (if (equal? (hash-ref (car cs) "type" "") "Q")
+            (set! found #t)
+            0)
+          (loop (cdr cs))))))))
+
+(display "ingest jdiv ok=")
+(display (daed:pipe-ok? r-j))
+(display " 3led ok=")
+(display (daed:pipe-ok? r-3led))
+(newline)
+
 ; ── 8. Existing linear circuit still validates ──
 (define lin
   (daed:circuit "lin"
@@ -284,6 +314,7 @@
        e-empty e-nognd e-r0 e-rneg e-vshort e-c0 e-dup e-badty e-dshort e-noval
        rec-ok keep-ok
        img-ok img-v html-ok miss-ok miss-reason
+       j-ok j-v led3-ok led3-has-q
        lin-ok esc-ok
        (= (daed:stats-ref "correctness_fail") 0)))
 

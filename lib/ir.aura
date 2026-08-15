@@ -2,8 +2,8 @@
 ;
 ; (require "ir" all:)
 ;
-; Hash-based daedalus-ir/1. Pure Aura. No JSON parser (host residual).
-; VLM / Python emit this shape; conversion to daed:circuit is deterministic.
+; Hash-based daedalus-ir/1. Pure Aura.
+; VLM JSON is ingested with json-parse + daed:ir-ingest (generic, tolerant).
 
 (export daed:ir-version
         daed:ir-schema-id
@@ -20,6 +20,8 @@
         daed:ir-comps
         daed:ir->circuit
         daed:circuit->ir
+        daed:ir-ingest
+        daed:ir-load
         daed:ir-ex-divider
         daed:ir-ex-rc
         daed:ir-ex-series-r
@@ -235,6 +237,223 @@
             0))
         0)
       out)))
+
+; ── Ingest VLM / file / hash JSON into a clean IR ──
+
+(define (daed:ir-str-has? s sub)
+  (if (or (not (string? s)) (not (string? sub)))
+    #f
+    (let ((n (string-length s))
+          (m (string-length sub))
+          (found #f)
+          (i 0))
+      (if (> m n)
+        #f
+        (begin
+          (while (lambda () (and (not found) (<= i (- n m))))
+            (lambda ()
+              (if (equal? (substring s i (+ i m)) sub)
+                (set! found #t)
+                0)
+              (set! i (+ i 1))))
+          found)))))
+
+(define (daed:ir-mem-num? x xs)
+  (if (null? xs)
+    #f
+    (if (equal? x (car xs))
+      #t
+      (daed:ir-mem-num? x (cdr xs)))))
+
+(define (daed:ir-type-alias ty)
+  (if (or (equal? ty "R") (equal? ty "r") (equal? ty "RESISTOR") (equal? ty "resistor"))
+    "R"
+    (if (or (equal? ty "C") (equal? ty "c") (equal? ty "CAPACITOR") (equal? ty "capacitor"))
+      "C"
+      (if (or (equal? ty "L") (equal? ty "l") (equal? ty "INDUCTOR") (equal? ty "inductor"))
+        "L"
+        (if (or (equal? ty "V") (equal? ty "v") (equal? ty "VOLTAGE") (equal? ty "voltage")
+                (equal? ty "BATTERY") (equal? ty "battery") (equal? ty "BT") (equal? ty "bt"))
+          "V"
+          (if (or (equal? ty "I") (equal? ty "i") (equal? ty "CURRENT") (equal? ty "current"))
+            "I"
+            (if (or (equal? ty "D") (equal? ty "d") (equal? ty "DIODE") (equal? ty "diode")
+                    (equal? ty "LED") (equal? ty "led"))
+              "D"
+              (if (or (equal? ty "Q") (equal? ty "q") (equal? ty "TRANSISTOR") (equal? ty "transistor")
+                      (equal? ty "NPN") (equal? ty "npn") (equal? ty "PNP") (equal? ty "pnp")
+                      (equal? ty "BJT") (equal? ty "bjt") (equal? ty "9013") (equal? ty "9014"))
+                "Q"
+                (if (or (equal? ty "M") (equal? ty "m") (equal? ty "MOSFET") (equal? ty "nmos"))
+                  "M"
+                  ty)))))))))
+
+(define (daed:ir-blob c)
+  (string-append
+    (if (string? (hash-ref c "name" #f)) (hash-ref c "name") "")
+    " "
+    (if (string? (hash-ref c "type" #f)) (hash-ref c "type") "")
+    " "
+    (if (string? (hash-ref c "value" #f)) (hash-ref c "value") "")
+    " "
+    (if (string? (hash-ref c "model" #f)) (hash-ref c "model") "")))
+
+(define (daed:ir-looks-led? c)
+  (let ((b (daed:ir-blob c)))
+    (or (daed:ir-str-has? b "LED") (daed:ir-str-has? b "led")
+        (daed:ir-str-has? b "发光"))))
+
+(define (daed:ir-looks-bjt? c)
+  (let ((b (daed:ir-blob c)))
+    (or (daed:ir-str-has? b "9013") (daed:ir-str-has? b "9014")
+        (daed:ir-str-has? b "9012") (daed:ir-str-has? b "8050")
+        (daed:ir-str-has? b "2N3904") (daed:ir-str-has? b "2n3904")
+        (daed:ir-str-has? b "2N2222"))))
+
+(define (daed:ir-tiny-is? v)
+  (let ((n (daed:parse-value v)))
+    (and (number? n) (> n 0.0) (< n 1e-6))))
+
+(define (daed:ir-copy-params src)
+  (let ((p (hash))
+        (s (hash-ref src "params" #f)))
+    (if s
+      (begin
+        (if (hash-ref s "Is" #f) (hash-set! p "Is" (hash-ref s "Is")) 0)
+        (if (hash-ref s "n" #f) (hash-set! p "n" (hash-ref s "n")) 0)
+        (if (hash-ref s "vt" #f) (hash-set! p "vt" (hash-ref s "vt")) 0)
+        (if (hash-ref s "bf" #f) (hash-set! p "bf" (hash-ref s "bf")) 0)
+        (if (hash-ref s "br" #f) (hash-set! p "br" (hash-ref s "br")) 0)
+        (if (hash-ref s "gmin" #f) (hash-set! p "gmin" (hash-ref s "gmin")) 0)
+        p)
+      p)))
+
+(define (daed:ir-comp-ingest raw)
+  (if (not raw)
+    #f
+    (let ((ty (daed:ir-type-alias (hash-ref raw "type" "")))
+          (nm (hash-ref raw "name" #f))
+          (val (hash-ref raw "value" ""))
+          (c (hash))
+          (p (daed:ir-copy-params raw)))
+      (if (not (string? nm))
+        (set! nm (hash-ref raw "label" #f))
+        0)
+      (if (or (not (string? nm)) (equal? nm ""))
+        #f
+        (begin
+          (if (or (daed:ir-looks-led? raw) (equal? ty "LED"))
+            (set! ty "D")
+            0)
+          (if (or (and (equal? ty "V") (daed:ir-looks-bjt? raw))
+                  (daed:ir-looks-bjt? raw))
+            (if (or (equal? ty "V") (equal? ty "X") (equal? ty ""))
+              (set! ty "Q")
+              0)
+            0)
+          (if (not (daed:ir-known-type? ty))
+            #f
+            (begin
+              (hash-set! c "type" ty)
+              (hash-set! c "name" nm)
+              (hash-set! c "n1" (daed:node-id (hash-ref raw "n1" 0)))
+              (hash-set! c "n2" (daed:node-id (hash-ref raw "n2" 0)))
+              (if (or (equal? ty "Q") (equal? ty "M"))
+                (hash-set! c "n3" (daed:node-id (hash-ref raw "n3" (hash-ref raw "ne" 0))))
+                0)
+              (if (equal? ty "Q")
+                (begin
+                  (if (not (number? (hash-ref p "Is" #f)))
+                    (if (daed:ir-tiny-is? val)
+                      (hash-set! p "Is" (daed:parse-value val))
+                      (hash-set! p "Is" 1e-15))
+                    0)
+                  (if (daed:ir-tiny-is? val)
+                    (set! val (if (daed:ir-looks-bjt? raw) "9013" "NPN"))
+                    0)
+                  (if (and (number? val) (>= val 100.0))
+                    (set! val (number->string (inexact->exact (round val))))
+                    0)
+                  (hash-set! c "params" p))
+                0)
+              (if (equal? ty "D")
+                (begin
+                  (if (not (number? (hash-ref p "Is" #f)))
+                    (if (daed:ir-tiny-is? val)
+                      (hash-set! p "Is" (daed:parse-value val))
+                      (hash-set! p "Is" 1e-14))
+                    0)
+                  (if (daed:ir-tiny-is? val)
+                    0
+                    0)
+                  (hash-set! c "params" p))
+                0)
+              (hash-set! c "value" val)
+              c)))))))
+
+(define (daed:ir-untie-emitters! comps)
+  (let ((bases '()))
+    (let loop ((cs comps))
+      (if (null? cs)
+        0
+        (begin
+          (if (equal? (hash-ref (car cs) "type" "") "Q")
+            (set! bases (cons (hash-ref (car cs) "n2" -1) bases))
+            0)
+          (loop (cdr cs)))))
+    (let loop2 ((cs comps))
+      (if (null? cs)
+        comps
+        (begin
+          (if (equal? (hash-ref (car cs) "type" "") "Q")
+            (let ((e (hash-ref (car cs) "n3" 0)))
+              (if (and (number? e) (not (= e 0)) (daed:ir-mem-num? e bases))
+                (hash-set! (car cs) "n3" 0)
+                0))
+            0)
+          (loop2 (cdr cs)))))))
+
+(define (daed:ir-read-src src)
+  (if (not (string? src))
+    src
+    (if (file-exists? src)
+      (json-parse (read-file src))
+      (json-parse src))))
+
+(define (daed:ir-ingest src)
+  (let ((obj (daed:ir-read-src src)))
+    (if (not obj)
+      #f
+      (let ((ir (daed:ir-new (hash-ref obj "title" "extracted")))
+            (acc '())
+            (cs (hash-ref obj "comps" '())))
+        (hash-set! ir "schema" daed:ir-schema-id)
+        (hash-set! ir "gnd" (daed:node-id (hash-ref obj "gnd" 0)))
+        (if (string? (hash-ref obj "notes" #f))
+          (hash-set! ir "notes" (hash-ref obj "notes"))
+          0)
+        (if (hash-ref obj "source" #f)
+          (hash-set! ir "source" (hash-ref obj "source"))
+          0)
+        (if (not (list? cs))
+          (set! cs '())
+          0)
+        (let loop ((xs cs))
+          (if (null? xs)
+            0
+            (begin
+              (let ((c (daed:ir-comp-ingest (car xs))))
+                (if c
+                  (set! acc (cons c acc))
+                  0))
+              (loop (cdr xs)))))
+        (set! acc (reverse acc))
+        (daed:ir-untie-emitters! acc)
+        (hash-set! ir "comps" acc)
+        ir))))
+
+(define (daed:ir-load path)
+  (daed:ir-ingest path))
 
 ; Reverse comps so ir-add-comp! cons-order still converts in source order
 ; when the caller used ir-add-comp!. List literals stay as written.

@@ -100,8 +100,11 @@
         (lim (if (and (number? budget) (> budget 0)) budget 12)))
     (hash-set! res "ok" #f)
     (hash-set! res "reason" "init")
-    (hash-set! res "ir" ir)
     (hash-set! res "source" "ir")
+    (if (or (string? ir) (and ir (hash-ref ir "comps" #f)))
+      (set! ir (daed:ir-ingest ir))
+      0)
+    (hash-set! res "ir" ir)
     (if (not ir)
       (begin
         (hash-set! res "reason" "no-ir")
@@ -130,10 +133,15 @@
 ; Image path → fixture IR (offline). Live VLM is scripts/extract-ir.py.
 ; Passing an IR hash is accepted (same as from-ir).
 (define (daed:from-image path)
-  (if (and path (hash-ref path "comps" #f))
+  (if (and path (not (string? path)) (hash-ref path "comps" #f))
     (let ((r (daed:from-ir path 12)))
       (hash-set! r "source" "ir-hash")
       r)
+    (if (and (string? path) (daed:str-ends? path ".json"))
+      (let ((r (daed:from-ir (daed:ir-ingest path) 12)))
+        (hash-set! r "path" path)
+        (hash-set! r "source" "json")
+        r)
     (let ((res (hash))
           (base (daed:basename path))
           (ir #f))
@@ -153,7 +161,7 @@
         (let ((r (daed:from-ir ir 12)))
           (hash-set! r "path" path)
           (hash-set! r "source" "fixture")
-          r)))))
+          r))))))
 
 (define (daed:pipe-ok? r)
   (hash-ref r "ok" #f))

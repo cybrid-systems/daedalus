@@ -522,14 +522,28 @@ def ir_to_aura(obj: dict) -> str:
 
 
 def sim_check(obj: dict) -> tuple[bool, str]:
-    """Optional host check: from-ir must reach pipe-ok (repair + .op)."""
+    """Optional host check: Aura ir-ingest + from-ir must reach pipe-ok."""
     runner = ROOT / "scripts" / "run-aura.sh"
     if not runner.is_file():
         return True, "no-run-aura"
+    jtmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", prefix="daed-ir-check-", delete=False
+    )
+    jtmp.write(json.dumps(obj, ensure_ascii=False))
+    jtmp.close()
+    script = (
+        '(require "daedalus-min" all:)\n'
+        f'(define r (daed:from-ir (daed:ir-ingest {json.dumps(jtmp.name)}) 12))\n'
+        '(display "ok=") (display (daed:pipe-ok? r))\n'
+        '(display " reason=") (display (daed:pipe-reason r)) (newline)\n'
+        '(if (daed:pipe-ok? r)\n'
+        '  (begin (display "RESULT pass") (newline))\n'
+        '  (begin (display "RESULT fail") (newline)))\n'
+    )
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".aura", prefix="daed-ir-check-", delete=False
     ) as fh:
-        fh.write(ir_to_aura(obj))
+        fh.write(script)
         path = fh.name
     try:
         proc = subprocess.run(
@@ -544,6 +558,10 @@ def sim_check(obj: dict) -> tuple[bool, str]:
     finally:
         try:
             os.unlink(path)
+        except OSError:
+            pass
+        try:
+            os.unlink(jtmp.name)
         except OSError:
             pass
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -619,7 +637,6 @@ def main() -> None:
             parsed = json.loads(strip_fence(text))
             if isinstance(parsed, dict):
                 dump_model_json(parsed, "before-normalize")
-                parsed = normalize_ir(parsed)
             return parsed, validate_ir(parsed)
         except json.JSONDecodeError as e:
             return None, [f"json: {e}"]
