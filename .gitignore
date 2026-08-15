@@ -15,6 +15,11 @@ build/
 __pycache__/
 *.py[cod]
 
+# Live from-image artifacts (photo + generated preview)
+examples/10-vision-pipeline/out/*.jpeg
+examples/10-vision-pipeline/out/*.jpg
+examples/10-vision-pipeline/out/3led.html
+
 # Editor / OS
 *~
 *.swp

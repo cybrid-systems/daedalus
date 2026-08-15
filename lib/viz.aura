@@ -66,11 +66,35 @@
 
 ; ── SVG fragments ──
 
-(define (daed:svg-node node volts-hash)
+(define (daed:node-names comps)
+  (let ((h (hash)))
+    (let loop ((cs comps))
+      (if (null? cs)
+        h
+        (let ((c (car cs))
+              (ty "")
+              (nm ""))
+          (set! ty (daed:comp-type c))
+          (set! nm (daed:comp-name c))
+          (if (equal? ty "Q")
+            (hash-set! h (number->string (daed:comp-n1 c)) nm)
+            (if (equal? ty "V")
+              (hash-set! h (number->string (daed:comp-n1 c)) nm)
+              0))
+          (loop (cdr cs)))))))
+
+(define (daed:svg-node node volts-hash names)
   (let ((x (daed:node-x node))
         (y (daed:node-y node))
-        (lab (if (<= node 0) "GND" (string-append "n" (daed:num->str node))))
+        (named (if names (hash-ref names (number->string node) #f) #f))
+        (lab "")
         (vv ""))
+    (set! lab
+      (if (<= node 0)
+        "GND"
+        (if (string? named)
+          named
+          (string-append "n" (daed:num->str node)))))
     (if (and volts-hash (> node 0))
       (let ((v (hash-ref volts-hash (number->string node) #f)))
         (if (number? v)
@@ -137,7 +161,19 @@
             (my (- (/ (+ y1 y2) 2.0) 28))
             (col (daed:comp-color ty))
             (lab (string-append ty " " nm))
-            (vlab (string-append (daed:num->str val) (daed:comp-unit ty))))
+            (vlab (string-append (daed:num->str val) (daed:comp-unit ty)))
+            (n3 (daed:comp-n3 c))
+            (leg3 ""))
+        (if (and (or (equal? ty "Q") (equal? ty "M")) (number? n3))
+          (let ((x3 (daed:node-x n3))
+                (y3 (daed:node-y n3)))
+            (if (<= n3 0) (begin (set! y3 200) (set! x3 (daed:node-x 0))) 0)
+            (set! leg3
+              (string-append
+                "<line x1=\"" (daed:num->str mx) "\" y1=\"" (daed:num->str (/ (+ y1 y2) 2.0))
+                "\" x2=\"" (daed:num->str x3) "\" y2=\"" (daed:num->str y3)
+                "\" stroke=\"#64748b\" stroke-width=\"2\" stroke-dasharray=\"3 3\"/>")))
+          0)
         (string-append
           "<g class=\"comp\" data-name=\"" (daed:svg-esc nm)
           "\" data-type=\"" (daed:svg-esc ty)
@@ -145,6 +181,7 @@
           "<line x1=\"" (daed:num->str x1) "\" y1=\"" (daed:num->str y1)
           "\" x2=\"" (daed:num->str x2) "\" y2=\"" (daed:num->str y2)
           "\" stroke=\"#64748b\" stroke-width=\"2\"/>"
+          leg3
           "<rect x=\"" (daed:num->str (- mx 36)) "\" y=\"" (daed:num->str (- my 18))
           "\" width=\"72\" height=\"36\" rx=\"6\" fill=\"#fff\" stroke=\"" col
           "\" stroke-width=\"2\"/>"
@@ -154,12 +191,12 @@
           "\" text-anchor=\"middle\" class=\"cv\">" vlab "</text>"
           "</g>")))))
 
-(define (daed:svg-nodes-html maxn volts)
+(define (daed:svg-nodes-html maxn volts names)
   (let ((acc "")
         (k 0))
     (while (lambda () (<= k maxn))
       (lambda ()
-        (set! acc (string-append acc (daed:svg-node k volts)))
+        (set! acc (string-append acc (daed:svg-node k volts names)))
         (set! k (+ k 1))))
     acc))
 
@@ -185,7 +222,8 @@
         0)
       0)
     (let ((w (+ 120 (* (+ maxn 1) 150)))
-          (h 340))
+          (h 340)
+          (names (daed:node-names comps)))
       (string-append
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
         (daed:num->str w) " " (daed:num->str h)
@@ -195,7 +233,7 @@
         "<line x1=\"40\" y1=\"200\" x2=\"" (daed:num->str (- w 40))
         "\" y2=\"200\" stroke=\"#cbd5e1\" stroke-width=\"1\" stroke-dasharray=\"4 4\"/>"
         (daed:svg-comps-html comps)
-        (daed:svg-nodes-html maxn volts)
+        (daed:svg-nodes-html maxn volts names)
         "</svg>"))))
 
 ; Params panel HTML + embedded JSON for edit-back (P2 client half)
@@ -233,21 +271,22 @@
               "\",\"type\":\"" (daed:comp-type c)
               "\",\"n1\":" (daed:num->str (daed:comp-n1 c))
               ",\"n2\":" (daed:num->str (daed:comp-n2 c))
+              ",\"n3\":" (daed:num->str (daed:comp-n3 c))
               ",\"value\":" (daed:num->str (daed:comp-value c))
               "}"))
           (loop (cdr cs)))))))
 
-(define (daed:volts-json results)
+(define (daed:volts-json results maxn)
   (if (not results)
     "{}"
     (let ((volts (hash-ref results "volts" #f)))
       (if (not volts)
         "{}"
-        ; fixed small set n0..n8 for denseness HTML (enough for probes)
         (let ((acc "{")
               (first #t)
-              (k 0))
-          (while (lambda () (<= k 8))
+              (k 0)
+              (lim (if (and (number? maxn) (> maxn 0)) maxn 8)))
+          (while (lambda () (<= k lim))
             (lambda ()
               (let ((v (hash-ref volts (number->string k) #f)))
                 (if (number? v)
@@ -295,11 +334,19 @@
       ".hint{color:#94a3b8;font-size:.85rem;margin-top:.5rem;line-height:1.4;}\n"
       ".badge{display:inline-block;background:#14532d;color:#bbf7d0;padding:.15rem .5rem;"
       "border-radius:999px;font-size:.75rem;margin-left:.5rem;}\n"
+      ".photo{max-width:100%;border-radius:8px;display:block;background:#0f172a;}\n"
       "</style>\n</head>\n<body>\n"
       "<h1>" title "<span class=\"badge\">viz v" (daed:num->str daed:viz-version) "</span></h1>\n"
       "<p class=\"sub\">Bidirectional preview · netlist → HTML"
       (if results " · .op voltages shown" "")
       " · edit values then export JSON for Aura apply</p>\n"
+      (let ((photo (hash-ref ckt "source-image" #f)))
+        (if (and (string? photo) (> (string-length photo) 0))
+          (string-append
+            "<div class=\"card\"><h2>Source photo</h2>"
+            "<img class=\"photo\" src=\"" photo "\" alt=\"source schematic\"/>"
+            "</div>\n")
+          ""))
       "<div class=\"card\">" svg "</div>\n"
       "<div class=\"card\">\n"
       "<h2>Parameters (edit-back)</h2>\n"
@@ -315,7 +362,7 @@
       "</div>\n"
       "<script type=\"application/json\" id=\"ckt-data\">"
       "{\"name\":\"" name "\",\"comps\":" (daed:comps-json comps)
-      ",\"volts\":" (daed:volts-json results) "}"
+      ",\"volts\":" (daed:volts-json results (daed:max-node comps)) "}"
       "</script>\n"
       "<script>\n"
       "(function(){\n"

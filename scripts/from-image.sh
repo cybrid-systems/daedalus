@@ -29,6 +29,12 @@ DRIVER="$(mktemp /tmp/daed-from-image.XXXXXX.aura)"
 cleanup() { rm -f "$DRIVER"; }
 trap cleanup EXIT
 
+OUT_DIR="$ROOT/examples/10-vision-pipeline/out"
+mkdir -p "$OUT_DIR"
+HTML_REL="examples/10-vision-pipeline/out/${STEM}.html"
+PHOTO_NAME="$(basename "$IMG")"
+cp -f "$IMG" "$OUT_DIR/$PHOTO_NAME"
+
 # Always try the fixture path first (no escape).
 cat > "$DRIVER" <<EOF
 (require "daedalus-min" all:)
@@ -47,6 +53,12 @@ cat > "$DRIVER" <<EOF
     (display " v2=")
     (display (daed:v (daed:pipe-sim r) 2))
     (newline)
+    (let ((ckt (daed:pipe-circuit r)))
+      (hash-set! ckt "source-image" "./${PHOTO_NAME}")
+      (let ((n (write-file "$HTML_REL" (daed:circuit->html ckt (daed:pipe-sim r)))))
+        (display "html=")
+        (display (if (> n 0) "$HTML_REL" "write-fail"))
+        (newline)))
     (display "RESULT pass example=from-image fixture=${STEM}")
     (newline))
   (begin
@@ -77,12 +89,15 @@ if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
   python3 "$ROOT/scripts/extract-ir.py" "$IMG" -o "$JSON"
   echo "from-image: IR json=${JSON}" >&2
   cat "$JSON"
-  python3 - "$JSON" "$DRIVER" <<'PY'
+  python3 - "$JSON" "$DRIVER" "$STEM" "$PHOTO_NAME" "$HTML_REL" <<'PY'
 import json, sys
 from pathlib import Path
 obj = json.loads(Path(sys.argv[1]).read_text())
 title = obj.get("title") or "extracted"
 comps = obj.get("comps") or []
+stem = sys.argv[3] if len(sys.argv) > 3 else "extracted"
+photo = sys.argv[4] if len(sys.argv) > 4 else ""
+html_rel = sys.argv[5] if len(sys.argv) > 5 else f"examples/10-vision-pipeline/out/{stem}.html"
 lines = [
     '(require "daedalus-min" all:)',
     f'(define ir (daed:ir-new {json.dumps(title)}))',
@@ -188,7 +203,14 @@ if has_dyn:
         f'(display "tran csv={csv_path}") (newline)',
     ]
 
+if photo:
+    lines.append(f'(hash-set! ckt "source-image" {json.dumps("./" + photo)})')
 lines += [
+    f"(define html (daed:circuit->html ckt sim))",
+    f"(define nw (write-file {json.dumps(html_rel)} html))",
+    '(display "html=")',
+    f"(display (if (> nw 0) {json.dumps(html_rel)} \"write-fail\"))",
+    "(newline)",
     '(if (daed:pipe-ok? r)',
     '  (begin (display "RESULT pass example=from-image source=vlm") (newline))',
     '  (begin (display "RESULT fail example=from-image") (newline)))',
