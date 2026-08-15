@@ -571,10 +571,20 @@ def main() -> None:
     notes.append(raw)
     print(f"extract-ir: raw_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
 
+    def dump_model_json(parsed: object, tag: str) -> None:
+        text = json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
+        Path("/tmp/daed-vlm-raw.json").write_text(text, encoding="utf-8")
+        print(f"extract-ir: dumped MiniMax JSON ({tag}) /tmp/daed-vlm-raw.json", file=sys.stderr)
+        if args.output:
+            raw_path = args.output.with_name(args.output.stem + ".minimax.json")
+            raw_path.write_text(text, encoding="utf-8")
+            print(f"extract-ir: dumped MiniMax JSON ({tag}) {raw_path}", file=sys.stderr)
+
     def try_parse(text: str) -> tuple[object | None, list[str]]:
         try:
             parsed = json.loads(strip_fence(text))
             if isinstance(parsed, dict):
+                dump_model_json(parsed, "before-normalize")
                 parsed = normalize_ir(parsed)
             return parsed, validate_ir(parsed)
         except json.JSONDecodeError as e:

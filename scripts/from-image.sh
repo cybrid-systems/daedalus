@@ -88,6 +88,12 @@ if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
   JSON="$(mktemp /tmp/daed-ir.XXXXXX.json)"
   python3 "$ROOT/scripts/extract-ir.py" "$IMG" -o "$JSON"
   echo "from-image: IR json=${JSON}" >&2
+  cp -f "$JSON" "$OUT_DIR/${STEM}.json"
+  if [[ -f "${JSON%.json}.minimax.json" ]]; then
+    cp -f "${JSON%.json}.minimax.json" "$OUT_DIR/${STEM}.minimax.json"
+    echo "from-image: MiniMax JSON=${OUT_DIR}/${STEM}.minimax.json" >&2
+  fi
+  echo "from-image: IR json copy=${OUT_DIR}/${STEM}.json" >&2
   cat "$JSON"
   python3 - "$JSON" "$DRIVER" "$STEM" "$PHOTO_NAME" "$HTML_REL" <<'PY'
 import json, sys

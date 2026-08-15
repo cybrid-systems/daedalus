@@ -19,6 +19,8 @@ __pycache__/
 examples/10-vision-pipeline/out/*.jpeg
 examples/10-vision-pipeline/out/*.jpg
 examples/10-vision-pipeline/out/3led.html
+examples/10-vision-pipeline/out/3led.json
+examples/10-vision-pipeline/out/3led.minimax.json
 
 # Editor / OS
 *~
