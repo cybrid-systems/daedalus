@@ -644,6 +644,14 @@ def main() -> None:
 
     obj, errs = try_parse(raw)
 
+    def after_parse(parsed, parse_errs):
+        if isinstance(parsed, dict):
+            parsed = normalize_ir(parsed)
+            parse_errs = validate_ir(parsed)
+        return parsed, parse_errs
+
+    obj, errs = after_parse(obj, errs)
+
     # Phase 2: text-only JSON conversion from the vision analysis / think dump.
     if errs:
         print(f"vlm-extract: phase1 failed ({'; '.join(errs)}); text→JSON", file=sys.stderr)
@@ -653,7 +661,7 @@ def main() -> None:
         )
         notes.append(raw)
         print(f"vlm-extract: phase2_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
-        obj, errs = try_parse(raw)
+        obj, errs = after_parse(*try_parse(raw))
 
     if errs:
         print(f"vlm-extract: phase2 failed ({'; '.join(errs)}); vision retry", file=sys.stderr)
@@ -672,7 +680,7 @@ def main() -> None:
             thinking="disabled",
         )
         notes.append(raw)
-        obj, errs = try_parse(raw)
+        obj, errs = after_parse(*try_parse(raw))
 
     if errs or obj is None:
         Path("/tmp/daed-vlm-raw.txt").write_text("\n\n----- PASS -----\n\n".join(notes), encoding="utf-8")
@@ -688,7 +696,7 @@ def main() -> None:
         )
         notes.append(raw)
         print(f"vlm-extract: sim-repair_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
-        fixed, ferrs = try_parse(raw)
+        fixed, ferrs = after_parse(*try_parse(raw))
         if not ferrs and isinstance(fixed, dict):
             sok, sreason = sim_check(fixed)
             print(f"vlm-extract: sim-repair {sreason}", file=sys.stderr)

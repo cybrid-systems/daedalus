@@ -21,6 +21,9 @@ examples/10-vision-pipeline/out/*.jpg
 examples/10-vision-pipeline/out/3led.html
 examples/10-vision-pipeline/out/3led.json
 examples/10-vision-pipeline/out/3led.minimax.json
+examples/10-vision-pipeline/out/*.tran.csv
+examples/10-vision-pipeline/out/*.op.txt
+examples/10-vision-pipeline/out/*-report.html
 
 # Editor / OS
 *~

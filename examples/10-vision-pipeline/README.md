@@ -32,6 +32,17 @@ export XAI_API_KEY=...          # or MINIMAX_API_KEY
 ./scripts/vlm-extract.py photo.jpg
 ```
 
+End-to-end photo → Grok 4.6 → schematic + `.tran` waveform HTML
+(key from `$XAI_API_KEY` or `~/code/keys/grok`):
+
+```bash
+./scripts/vision-report.sh examples/10-vision-pipeline/out/3led.jpeg
+# reuse an existing IR JSON (no API call):
+./scripts/vision-report.sh examples/10-vision-pipeline/out/3led.jpeg --skip-extract
+```
+
+Writes `out/<stem>.html` (schematic), `out/<stem>.tran.csv`, and `out/<stem>-report.html`.
+
 ## Adding a fixture
 
 1. Drop a schematic image in `fixtures/` (any `stem.png` / `.svg`).
