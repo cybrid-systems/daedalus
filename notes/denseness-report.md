@@ -91,7 +91,7 @@ should remain predominantly pure Aura. Escapes are rare, metered, and logged.
 ### Issue #6 narrative (vision pipeline)
 
 - `daedalus-ir/1` + `ir->circuit` / `circuit->ir`; static validator; rule-based repair with snapshot/rollback.
-- `from-image` is fixture-first. Live VLM (`scripts/extract-ir.py`) is a logged host escape, not on the probe path.
+- `from-image` is fixture-first. Live VLM (`scripts/vlm-extract.py`) is a logged host escape, not on the probe path.
 - Probe 10: 5 clean IRs simulate; ≥10 broken IRs diagnosed; ≥7/10 seeded repairs recover; fixture `from-image`; escapes=0.
 
 ---

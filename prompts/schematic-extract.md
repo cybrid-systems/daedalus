@@ -1,6 +1,6 @@
 # Schematic extraction prompt — `daedalus-ir/1`
 
-Used by `scripts/extract-ir.py` (metered VLM escape). Offline denseness
+Used by `scripts/vlm-extract.py` (metered VLM escape). Offline denseness
 probes do **not** call this path.
 
 ## System

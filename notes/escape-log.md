@@ -46,12 +46,13 @@ No leave from \(V_A\). Shockley diode, Ebers-Moll NPN, dense Newton-Raphson (wit
 ## Issue #6 (vision pipeline)
 
 Core path (`ir` / `validate` / `repair` / `from-ir` / fixture `from-image`) stays
-in \(V_A\). The optional live extractor `scripts/extract-ir.py` is a **metered
+in \(V_A\). The optional live extractor `scripts/vlm-extract.py` is a **metered
 host escape** (xAI or MiniMax multimodal). Probes use fixtures only (`E=0`).
 
 | Date | Location | Reason | Mechanism | Impact | Mitigation / Plan |
 |------|----------|--------|-----------|--------|-------------------|
-| 2026-08-13 | `scripts/extract-ir.py` | Schematic photo → IR | HTTP VLM (xAI default; MiniMax optional) | Offline probes do not call it | Fixture `from-image`; log every live call |
+| 2026-08-13 | `scripts/vlm-extract.py` | Schematic photo → JSON | HTTP VLM (xAI / MiniMax) | Offline probes do not call it | Aura `daed:ir-ingest` turns JSON into IR |
+| 2026-08-15 | renamed `extract-ir.py` → `vlm-extract.py` | Host only fetches JSON | — | — | IR conversion is Aura |
 
 ## Issue #12 (controlled sources)
 

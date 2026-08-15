@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Metered VLM escape: schematic image → daedalus-ir/1 JSON.
+"""Metered VLM escape: schematic image → JSON (not IR).
 
-Offline denseness does not use this. Default live backend is xAI
-(OpenAI-compatible, XAI_API_KEY). MiniMax is optional (MINIMAX_API_KEY).
+Aura turns that JSON into IR with daed:ir-ingest. Offline denseness
+does not use this. Default live backend is xAI (XAI_API_KEY).
+MiniMax is optional (MINIMAX_API_KEY).
 
 Usage:
-  ./scripts/extract-ir.py photo.jpg
-  DAEDALUS_VLM=minimax ./scripts/extract-ir.py photo.jpg
+  ./scripts/vlm-extract.py photo.jpg
+  DAEDALUS_VLM=minimax ./scripts/vlm-extract.py photo.jpg
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ LED_HINTS = ("led", "发光")
 
 
 def die(msg: str, code: int = 2) -> None:
-    print(f"extract-ir: {msg}", file=sys.stderr)
+    print(f"vlm-extract: {msg}", file=sys.stderr)
     raise SystemExit(code)
 
 
@@ -127,13 +128,13 @@ def chat(
         err = e.read()[:500]
         if e.code == 401 and "minimax.io" in base:
             alt = base.replace("api.minimax.io", "api.minimaxi.com")
-            print(f"extract-ir: 401 on {base}; retry {alt}", file=sys.stderr)
+            print(f"vlm-extract: 401 on {base}; retry {alt}", file=sys.stderr)
             return chat(
                 api_key, alt, model, messages,
                 max_tokens=max_tokens, thinking=thinking,
             )
         if e.code == 400 and thinking and b"thinking" in err.lower():
-            print("extract-ir: thinking param rejected; retry without", file=sys.stderr)
+            print("vlm-extract: thinking param rejected; retry without", file=sys.stderr)
             return chat(
                 api_key, base, model, messages,
                 max_tokens=max_tokens, thinking=None,
@@ -149,7 +150,7 @@ def chat(
         finish = choice.get("finish_reason")
         usage = payload.get("usage") or {}
         print(
-            f"extract-ir: finish={finish} usage={usage} "
+            f"vlm-extract: finish={finish} usage={usage} "
             f"content_len={len(content)} reason_len={len(reason)}",
             file=sys.stderr,
         )
@@ -336,7 +337,7 @@ def _tie_common_emitters(obj: dict) -> dict:
     chained = any(e not in (0, None) and e in bases for e in emitters)
     if not chained:
         return obj
-    print("extract-ir: tie chained Q emitters to GND (node 0)", file=sys.stderr)
+    print("vlm-extract: tie chained Q emitters to GND (node 0)", file=sys.stderr)
     for c in qs:
         c["n3"] = 0
     return obj
@@ -403,7 +404,7 @@ def _canonical_led_chaser(obj: dict) -> dict:
         labeled_c = sorted(labeled_c, key=_name_sort)[:3]
         dropped = [c.get("name") for c in caps if c not in labeled_c]
         if dropped:
-            print(f"extract-ir: drop extra C {dropped}", file=sys.stderr)
+            print(f"vlm-extract: drop extra C {dropped}", file=sys.stderr)
         caps = labeled_c
     else:
         caps = sorted(caps, key=_name_sort)[:3]
@@ -412,7 +413,7 @@ def _canonical_led_chaser(obj: dict) -> dict:
         val = _eng(cap.get("value"))
         if val is not None and 5e-5 <= val <= 2e-4:
             if cap.get("value") != "100uF":
-                print(f"extract-ir: {cap.get('name')} → 100uF (schematic)", file=sys.stderr)
+                print(f"vlm-extract: {cap.get('name')} → 100uF (schematic)", file=sys.stderr)
             cap["value"] = "100uF"
 
     vcc, gnd = 1, 0
@@ -440,7 +441,7 @@ def _canonical_led_chaser(obj: dict) -> dict:
 
     keep_ids = {id(c) for c in vs + qs + ds + caps + big + small}
     obj["comps"] = [c for c in comps if id(c) in keep_ids]
-    print("extract-ir: canonical 3-LED ring (C1=C2=C3=100uF, labels kept)", file=sys.stderr)
+    print("vlm-extract: canonical 3-LED ring (C1=C2=C3=100uF, labels kept)", file=sys.stderr)
     return obj
 
 
@@ -604,7 +605,7 @@ def main() -> None:
         die(f"not a file: {args.image}")
 
     key, base, model = provider()
-    print(f"extract-ir: escape model={model} base={base}", file=sys.stderr)
+    print(f"vlm-extract: escape model={model} base={base}", file=sys.stderr)
     url = data_url(args.image)
     extra = (
         "This may be a photographed textbook schematic (possibly rotated 90°). "
@@ -621,16 +622,16 @@ def main() -> None:
     notes: list[str] = []
     raw = chat(key, base, model, vision_messages(url, extra), thinking="disabled")
     notes.append(raw)
-    print(f"extract-ir: raw_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
+    print(f"vlm-extract: raw_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
 
     def dump_model_json(parsed: object, tag: str) -> None:
         text = json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
         Path("/tmp/daed-vlm-raw.json").write_text(text, encoding="utf-8")
-        print(f"extract-ir: dumped MiniMax JSON ({tag}) /tmp/daed-vlm-raw.json", file=sys.stderr)
+        print(f"vlm-extract: dumped MiniMax JSON ({tag}) /tmp/daed-vlm-raw.json", file=sys.stderr)
         if args.output:
             raw_path = args.output.with_name(args.output.stem + ".minimax.json")
             raw_path.write_text(text, encoding="utf-8")
-            print(f"extract-ir: dumped MiniMax JSON ({tag}) {raw_path}", file=sys.stderr)
+            print(f"vlm-extract: dumped MiniMax JSON ({tag}) {raw_path}", file=sys.stderr)
 
     def try_parse(text: str) -> tuple[object | None, list[str]]:
         try:
@@ -645,17 +646,17 @@ def main() -> None:
 
     # Phase 2: text-only JSON conversion from the vision analysis / think dump.
     if errs:
-        print(f"extract-ir: phase1 failed ({'; '.join(errs)}); text→JSON", file=sys.stderr)
+        print(f"vlm-extract: phase1 failed ({'; '.join(errs)}); text→JSON", file=sys.stderr)
         raw = chat(
             key, base, model, json_messages("\n\n".join(notes), errs),
             thinking="disabled",
         )
         notes.append(raw)
-        print(f"extract-ir: phase2_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
+        print(f"vlm-extract: phase2_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
         obj, errs = try_parse(raw)
 
     if errs:
-        print(f"extract-ir: phase2 failed ({'; '.join(errs)}); vision retry", file=sys.stderr)
+        print(f"vlm-extract: phase2 failed ({'; '.join(errs)}); vision retry", file=sys.stderr)
         raw = chat(
             key,
             base,
@@ -675,29 +676,29 @@ def main() -> None:
 
     if errs or obj is None:
         Path("/tmp/daed-vlm-raw.txt").write_text("\n\n----- PASS -----\n\n".join(notes), encoding="utf-8")
-        print("extract-ir: wrote /tmp/daed-vlm-raw.txt", file=sys.stderr)
+        print("vlm-extract: wrote /tmp/daed-vlm-raw.txt", file=sys.stderr)
         die("IR validation failed: " + "; ".join(errs), 1)
 
     sim_ok, sim_reason = sim_check(obj)
-    print(f"extract-ir: sim {sim_reason}", file=sys.stderr)
+    print(f"vlm-extract: sim {sim_reason}", file=sys.stderr)
     if not sim_ok:
         raw = chat(
             key, base, model, sim_repair_messages(obj, sim_reason),
             thinking="disabled",
         )
         notes.append(raw)
-        print(f"extract-ir: sim-repair_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
+        print(f"vlm-extract: sim-repair_len={len(raw)} head={raw[:160]!r}", file=sys.stderr)
         fixed, ferrs = try_parse(raw)
         if not ferrs and isinstance(fixed, dict):
             sok, sreason = sim_check(fixed)
-            print(f"extract-ir: sim-repair {sreason}", file=sys.stderr)
+            print(f"vlm-extract: sim-repair {sreason}", file=sys.stderr)
             if sok:
                 obj = fixed
                 sim_ok = True
             else:
-                print("extract-ir: repair still fails sim", file=sys.stderr)
+                print("vlm-extract: repair still fails sim", file=sys.stderr)
         else:
-            print(f"extract-ir: sim-repair invalid ({'; '.join(ferrs)})", file=sys.stderr)
+            print(f"vlm-extract: sim-repair invalid ({'; '.join(ferrs)})", file=sys.stderr)
         if not sim_ok:
             Path("/tmp/daed-vlm-raw.txt").write_text(
                 "\n\n----- PASS -----\n\n".join(notes), encoding="utf-8"

@@ -29,7 +29,7 @@ Live extraction (optional escape):
 
 ```bash
 export XAI_API_KEY=...          # or MINIMAX_API_KEY
-./scripts/extract-ir.py photo.jpg
+./scripts/vlm-extract.py photo.jpg
 ```
 
 ## Adding a fixture

@@ -123,7 +123,7 @@ required=(
   "examples/16-nl-op-suite/spice/bjt-ce.cir"
   "notes/nl-op-compare.md"
   "scripts/compare-ngspice.sh"
-  "scripts/extract-ir.py"
+  "scripts/vlm-extract.py"
   "scripts/from-image.sh"
   "scripts/run-aura.sh"
   "scripts/run-all.sh"

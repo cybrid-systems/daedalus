@@ -66,7 +66,7 @@ Primary objects under test:
 - Probe `31-native-op-nr` — optional native `.op` / Newton (issue #34)
 - Native ABI: `extern "C"` + workspace variant + CMake/g++ (`scripts/check-native-abi.sh`, issue #29)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
-- Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/extract-ir.py`.
+- Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/vlm-extract.py`.
 - Roadmap: M0–M4 done (issue #27). M5 #28–#34 landed.
 
 **Post-M4:** M5 C++ hot-swap (metered); optional multi-agent compose, PNP / astable, richer viz.

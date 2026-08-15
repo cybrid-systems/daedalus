@@ -2,7 +2,7 @@
 # One-command image → simulate (issue #6 / #11).
 #
 # Offline: basename matches a registered fixture → pure-Aura from-image.
-# Live: if no fixture and an API key is set, extract-ir.py (metered escape)
+# Live: if no fixture and an API key is set, vlm-extract.py (metered escape)
 # then convert JSON to a tiny Aura driver.
 #
 # Usage:
@@ -84,9 +84,9 @@ if grep -q "no-fixture" /tmp/daed-from-image.log 2>/dev/null; then
     echo "no fixture for ${STEM}; set XAI_API_KEY or MINIMAX_API_KEY to extract" >&2
     exit 1
   fi
-  echo "from-image: fixture miss → extract-ir.py (escape)" >&2
+  echo "from-image: fixture miss → vlm-extract.py (escape)" >&2
   JSON="$(mktemp /tmp/daed-ir.XXXXXX.json)"
-  python3 "$ROOT/scripts/extract-ir.py" "$IMG" -o "$JSON"
+  python3 "$ROOT/scripts/vlm-extract.py" "$IMG" -o "$JSON"
   echo "from-image: IR json=${JSON}" >&2
   cp -f "$JSON" "$OUT_DIR/${STEM}.json"
   if [[ -f "${JSON%.json}.minimax.json" ]]; then
