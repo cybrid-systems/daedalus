@@ -1,0 +1,16 @@
+* M6 frozen diode-clamp (issue #35 / probe 32)
+* PULSE 0→5, td=0, tr=tf=1us, pw=0.5ms, per=1ms
+* Educational Shockley IS=1e-14 N=1; pin T=TNOM so Vt≈26 mV
+*
+* ngspice 43 (or any 4x). Not required to merge the probe.
+*
+V1 in 0 PULSE(0 5 0 1u 1u 0.5m 1m)
+R1 in mid 1k
+C1 mid 0 10n
+D1 mid out dclamp
+R2 out 0 10k
+.model dclamp D (IS=1e-14 N=1)
+.options TEMP=27 TNOM=27
+.tran 10u 2m
+.print tran v(out) v(mid) v(in)
+.end

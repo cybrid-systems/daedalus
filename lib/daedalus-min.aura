@@ -204,6 +204,7 @@
 (require "vision" all:)
 
 ; 7 = M0 controlled sources E/G/F/H (issue #12)
+; M6 live kernel is lib/kernel.aura, required by probe 32 (not this facade).
 (define daed:min-version 7)
 
 (daed:install-builtin-fixtures!)

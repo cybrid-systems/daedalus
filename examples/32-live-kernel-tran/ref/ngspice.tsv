@@ -1,0 +1,8 @@
+# t_s	v_out	note
+# Educational samples for the frozen clamp. Ruler, not a trophy.
+# Bound: RMSE < 0.25 V (5 % of 5 V pulse).
+0.0	0.0	zero-state
+0.00025	3.90	first pulse high, RC settled (τ=10 µs)
+0.00075	0.05	first pulse low, diode off
+0.00125	3.90	second pulse high
+0.00175	0.05	second pulse low

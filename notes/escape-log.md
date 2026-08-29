@@ -127,6 +127,14 @@ No leave from \(V_A\). Add/remove, series/parallel/tap, and family search
 stay on `topology-ok?` + circuit snapshot. Restore now includes the
 component list so added devices disappear on rollback.
 
+## Issue #35 (live kernel hot-swap / M6)
+
+No leave from \(V_A\). K1–K4 rebind, split world/kernel snapshots, the live
+BE+NR stepper, and the step audit stay on the existing dense GE + Shockley
+stamp. Host `ast:snapshot` is still best-effort (`-1` offline); kernel-slot
+ids are the circuit-domain analog. `write-file` of `audit.tsv` is the same
+host primitive used by viz / `.measure` CSV, not a numerical escape.
+
 ## Issue #34 (optional native `.op` / Newton)
 
 Same leave as #28. `simulate-op` (linear and NR) calls `dense-solve!`, so

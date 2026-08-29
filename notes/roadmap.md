@@ -1,13 +1,16 @@
-# Roadmap — M0 → M5
+# Roadmap — M0 → M6
 
-Living copy of [issue #27](https://github.com/cybrid-systems/daedalus/issues/27).
-**Date:** 2026-08-14
+Living copy of [issue #27](https://github.com/cybrid-systems/daedalus/issues/27)
+plus [issue #35](https://github.com/cybrid-systems/daedalus/issues/35) (M6).
+**Date:** 2026-08-29
 
 Daedalus is a living laboratory: mutable FlatAST circuits, snapshot/rollback,
 agent loops. Production accuracy stays with ngspice / LTspice via export (#26).
 A thin C++ kernel escape is M5, not a replacement for the semantic layer.
+M6 is the denseness claim Git+file agents cannot match: rebind the Jacobian
+assembler mid-`.tran` without restarting or dropping `v`.
 
-**Suite:** 34/34 (31 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
+**Suite:** 35/35 (32 probes + ngspice-compare + export-roundtrip + check-native-abi), core \(E=0\) on the default pure backend.
 
 | Milestone | Scope | Status |
 |-----------|--------|--------|
@@ -17,6 +20,7 @@ A thin C++ kernel escape is M5, not a replacement for the semantic layer.
 | **M3** | Convergence & analysis | **done** (#21–#23) |
 | **M4** | Agent-driven evolution | **done** (#24–#26) |
 | **M5** | Native kernel escape | **done** (#28–#34, probes 26–31) |
+| **M6** | Live kernel hot-swap during `.tran` | **done** (#35–#43, probe 32) |
 
 ## Milestone 0 – P0 Completion — done
 
@@ -68,6 +72,31 @@ hot-swap demo, and optional native `.op` / Newton.
 - [x] [#34](https://github.com/cybrid-systems/daedalus/issues/34) Optional native `.op` / Newton backend — probe 31
 
 Semantic layer stays pure Aura. Native calls are metered and rollback-safe.
+
+## Milestone 6 – Live kernel hot-swap during `.tran` — done (issues #35–#43)
+
+Parent: **[#35](https://github.com/cybrid-systems/daedalus/issues/35)** — probe 32.
+
+While a transient is already running, an agent rebinds the solver kernel
+(not the netlist). The next BE+NR step uses the new bindings. If Newton
+diverges, rollback restores **only the kernel**. Simulation time `t` and
+the voltage vector `v` stay at the last accepted point. Audit answers
+which `assemble-jacobian` was live at `t = 1.20 ms`.
+
+Work lands in `lib/kernel.aura` + `examples/32-live-kernel-tran/`
+(issue text said “example 26”; 26–31 were already M5).
+
+- [x] [#36](https://github.com/cybrid-systems/daedalus/issues/36) Freeze PoC netlist + split world/kernel snapshot keys
+- [x] [#37](https://github.com/cybrid-systems/daedalus/issues/37) Expose K1–K4 as stable live defines
+- [x] [#38](https://github.com/cybrid-systems/daedalus/issues/38) BE+NR stepper: next-step uses new kernel; nr-diverge rolls back kernel only
+- [x] [#39](https://github.com/cybrid-systems/daedalus/issues/39) Step audit log + time-travel query at t = 1.20 ms
+- [x] [#40](https://github.com/cybrid-systems/daedalus/issues/40) Example `32-live-kernel-tran` + scripted mid-run perturbations
+- [x] [#41](https://github.com/cybrid-systems/daedalus/issues/41) Bench gates: no-restart, id stability, ngspice RMSE ruler
+- [x] [#42](https://github.com/cybrid-systems/daedalus/issues/42) Aether loop on example 32 (recorded policy)
+- [x] [#43](https://github.com/cybrid-systems/daedalus/issues/43) File-agent contrast B + demo notes
+
+Do not reopen #27. Contrast vs #15 / #18 / #24 / #33: see
+`examples/32-live-kernel-tran/NOTES.md`.
 
 ## Strategy
 

@@ -35,28 +35,28 @@
       (and dc? (equal? ty "L"))))
 
 (define (daed:count-branches comps dc?)
-  (let ((n 0))
-    (let loop ((cs comps))
-      (if (null? cs)
-        n
-        (begin
-          (if (daed:needs-branch? (daed:comp-type (car cs)) dc?)
-            (set! n (+ n 1))
-            0)
-          (loop (cdr cs)))))))
+  (let loop ((cs comps) (n 0))
+    (if (null? cs)
+      n
+      (loop (cdr cs)
+            (if (daed:needs-branch? (daed:comp-type (car cs)) dc?)
+              (+ n 1)
+              n)))))
 
 ; name → MNA branch index (after voltage unknowns).
+; Counter in a hash: host set! of a let-local idx is unreliable.
 (define (daed:branch-map comps dc?)
   (let ((h (hash))
-        (idx (daed:n-voltage-unknowns comps)))
+        (box (hash)))
+    (hash-set! box "n" (daed:n-voltage-unknowns comps))
     (let loop ((cs comps))
       (if (null? cs)
         h
         (begin
           (if (daed:needs-branch? (daed:comp-type (car cs)) dc?)
             (begin
-              (hash-set! h (daed:comp-name (car cs)) idx)
-              (set! idx (+ idx 1)))
+              (hash-set! h (daed:comp-name (car cs)) (hash-ref box "n" 0))
+              (hash-set! box "n" (+ 1 (hash-ref box "n" 0))))
             0)
           (loop (cdr cs)))))))
 

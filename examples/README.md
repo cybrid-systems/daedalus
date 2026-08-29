@@ -45,6 +45,7 @@ Each probe is a self-contained denseness experiment on \(S_{\mathrm{Daedalus}}\)
 | 29 | [buf-exchange](29-buf-exchange/) | Opaque copy-in/out + soak | **PASS** (issue #32 / M5) |
 | 30 | [native-hotswap-demo](30-native-hotswap-demo/) | pure → C++ → dual rollback | **PASS** (issue #33 / M5) |
 | 31 | [native-op-nr](31-native-op-nr/) | native `.op` / Newton optional backend | **PASS** (issue #34 / M5) |
+| 32 | [live-kernel-tran](32-live-kernel-tran/) | live K1–K4 hot-swap during `.tran` | **PASS** (issue #35 / M6) |
 
 ABI/build conventions (issue #29): `./scripts/check-native-abi.sh` — `nm`/`dlsym` + workspace variant, no Aura required.
 
@@ -66,3 +67,4 @@ ABI/build conventions (issue #29): `./scripts/check-native-abi.sh` — `nm`/`dls
 | **M3** | 20–22 | Convergence aids + `.step` / temperature + Monte Carlo (issues #21–#23) |
 | **M4** | 23–25 | Agent search + topology mutate + SPICE export (issues #24–#26) |
 | **M5** | 26 | Native C++ dense-solve hot-swap (issue #28) |
+| **M6** | 32 | Live kernel hot-swap during `.tran` (issue #35) |
