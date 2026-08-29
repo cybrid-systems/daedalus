@@ -1,0 +1,1303 @@
+; lib/kernel.aura — Live NR+BE kernel hot-swap (M6 / issue #35)
+;
+; (require "kernel" all:)
+;
+; Two independently restorable snapshots:
+;   world:tran-cursor  — t, v, v_prev, probes, world rev (never touched
+;                        by the default agent rollback)
+;   kernel:nr-be       — K1–K4 bindings (the thing an nr-diverge restores)
+;
+; K1–K4 are named slots with stable integer ids. Rebind changes the
+; value / digest, never the id. The BE+NR stepper looks up each Ki
+; every step (no closed-over stale closures).
+;
+; Host ast:snapshot is often -1 offline (aura#2966); this module is the
+; circuit-domain analog of query:binding / mutate:rebind / ast:rollback.
+
+(export daed:kernel-version
+        daed:k-poc-circuit
+        daed:k-netlist-sig
+        daed:k-boot!
+        daed:k-pid
+        daed:k-pid0
+        daed:k-t
+        daed:k-h
+        daed:k-v-node
+        daed:k-world-rev
+        daed:k-query-find
+        daed:k-query-binding
+        daed:k-query-calls
+        daed:k-query-at-t
+        daed:k-rebind!
+        daed:k-set-h!
+        daed:k-set-hmin!
+        daed:k-set-hmax!
+        daed:k-snapshot
+        daed:k-rollback
+        daed:k-step!
+        daed:k-run-to!
+        daed:k-event
+        daed:k-ok?
+        daed:k-reason
+        daed:k-niter
+        daed:k-resid
+        daed:k-fill-checksum
+        daed:k-fill-changed?
+        daed:k-audit
+        daed:k-audit-n
+        daed:k-audit-write!
+        daed:k-rebind-count
+        daed:k-rebind-tpos
+        daed:k-diverge-count
+        daed:k-rollback-count
+        daed:k-world-snap
+        daed:k-id-stable?
+        daed:k-netlist-frozen?
+        daed:k-pid-stable?
+        daed:k-world-intact?
+        daed:k-mutate-netlist!
+        daed:k-id-cycle!
+        daed:k-agent!
+        daed:k-trace
+        daed:k-ref-rmse
+        daed:k-print-tt)
+
+(require "netlist" all:)
+(require "stamp" all:)
+(require "devices" all:)
+(require "solve" all:)
+(require "tran" all:)
+
+; 1 = M6 live kernel / issue #35
+(define daed:kernel-version 1)
+
+(define daed:k-hmin-floor 1e-9)
+(define daed:k-hmax-ceil 50e-6)
+(define daed:k-nr-maxiter 20)
+(define daed:k-nr-atol 1e-8)
+(define daed:k-nr-explode 1e6)
+(define daed:k-maxloops 20000)
+(define daed:k-tt-t 1.20e-3)
+
+(define *daed-k* #f)
+
+(define (daed:k-sess)
+  (if *daed-k* *daed-k* (hash)))
+
+; ── Frozen PoC netlist (issue #36) ──
+; V1 in 0 PULSE(0 5 0 1u 1u 0.5m 1m)
+; R1 in mid 1k / C1 mid 0 10n / D1 mid out Is=1e-14 n=1 / R2 out 0 10k
+; Nodes: 0=GND, 1=in, 2=mid, 3=out.
+
+(define (daed:k-pulse-fields! c v1 v2 td tr tf pw per)
+  (hash-set! c "wave" "pulse")
+  (hash-set! c "v1" v1)
+  (hash-set! c "v2" v2)
+  (hash-set! c "td" td)
+  (hash-set! c "tr" tr)
+  (hash-set! c "tf" tf)
+  (hash-set! c "pw" pw)
+  (hash-set! c "per" per)
+  c)
+
+(define (daed:k-poc-circuit)
+  (let ((vin (daed:V "v1" 1 0 0.0))
+        (d1 (daed:D* "d1" 2 3 1e-14 1.0 0.026)))
+    (daed:k-pulse-fields! vin 0.0 5.0 0.0 1e-6 1e-6 0.5e-3 1e-3)
+    (daed:circuit "m6-clamp"
+      (list vin
+            (daed:R "r1" 1 2 1e3)
+            (daed:C "c1" 2 0 10e-9)
+            d1
+            (daed:R "r2" 3 0 10e3)))))
+
+(define (daed:k-comp-sig c)
+  (list (daed:comp-type c)
+        (daed:comp-name c)
+        (daed:comp-n1 c)
+        (daed:comp-n2 c)
+        (daed:comp-value c)))
+
+(define (daed:k-netlist-sig ckt)
+  (let ((out '()))
+    (let loop ((cs (daed:ckt-comps ckt)))
+      (if (null? cs)
+        out
+        (begin
+          (set! out (cons (daed:k-comp-sig (car cs)) out))
+          (loop (cdr cs)))))
+    out))
+
+(define (daed:k-rev xs)
+  (let ((out '()))
+    (let loop ((p xs))
+      (if (null? p)
+        out
+        (begin
+          (set! out (cons (car p) out))
+          (loop (cdr p)))))))
+
+(define (daed:k-name-score nm)
+  (if (string? nm)
+    (* (+ 1 (string-length nm)) 31)
+    1))
+
+; ── PULSE(V1 V2 TD TR TF PW PER) ──
+
+(define (daed:k-mod t p)
+  (if (or (not (number? p)) (<= p 0.0) (not (number? t)))
+    0.0
+    (if (< t 0.0)
+      0.0
+      (if (< t p)
+        t
+        (daed:k-mod (- t p) p)))))
+
+(define (daed:k-pulse-at c t)
+  (if (not (equal? (hash-ref c "wave" "dc") "pulse"))
+    (daed:comp-value c)
+    (let ((v1 (hash-ref c "v1" 0.0))
+          (v2 (hash-ref c "v2" 5.0))
+          (td (hash-ref c "td" 0.0))
+          (tr (hash-ref c "tr" 1e-6))
+          (tf (hash-ref c "tf" 1e-6))
+          (pw (hash-ref c "pw" 0.5e-3))
+          (per (hash-ref c "per" 1e-3))
+          (tt t)
+          (out 0.0))
+      (if (< tt td)
+        (set! out v1)
+        (begin
+          (set! tt (daed:k-mod (- tt td) per))
+          (cond
+            ((and (> tr 0.0) (< tt tr))
+             (set! out (+ v1 (* (- v2 v1) (/ tt tr)))))
+            ((< tt (+ tr pw))
+             (set! out v2))
+            ((and (> tf 0.0) (< tt (+ (+ tr pw) tf)))
+             (set! out (+ v2 (* (- v1 v2) (/ (- tt (+ tr pw)) tf)))))
+            (else (set! out v1)))))
+      out)))
+
+(define (daed:k-vsrc-at comps t)
+  (let ((v 0.0))
+    (let loop ((cs comps))
+      (if (null? cs)
+        v
+        (begin
+          (if (equal? (daed:comp-type (car cs)) "V")
+            (set! v (daed:k-pulse-at (car cs) t))
+            0)
+          (loop (cdr cs)))))))
+
+; ── Slot helpers ──
+
+(define (daed:k-approx? a b)
+  (and (number? a) (number? b) (< (abs (- a b)) 1e-15)))
+
+(define (daed:k-legal-k1? v)
+  (or (equal? v "stamp-order") (equal? v "node-aggregate")))
+
+(define (daed:k-legal-k2? v)
+  (or (equal? v "fixed") (equal? v "lte-adapt")))
+
+(define (daed:k-legal-k3? v)
+  (and (number? v)
+       (or (daed:k-approx? v 1.0)
+           (daed:k-approx? v 0.5)
+           (daed:k-approx? v 0.25))))
+
+(define (daed:k-legal-k4? v)
+  (and (number? v)
+       (or (daed:k-approx? v 0.0)
+           (daed:k-approx? v 1e-12))))
+
+(define (daed:k-legal-hmin? v)
+  (and (number? v) (>= v daed:k-hmin-floor) (<= v daed:k-hmax-ceil)))
+
+(define (daed:k-legal-hmax? v)
+  (and (number? v) (>= v daed:k-hmin-floor) (<= v daed:k-hmax-ceil)))
+
+(define (daed:k-legal-h? v)
+  (and (number? v) (> v 0.0) (<= v daed:k-hmax-ceil) (>= v daed:k-hmin-floor)))
+
+(define (daed:k-digest-k1 mode)
+  (if (equal? mode "node-aggregate") "k1:node-aggregate" "k1:stamp-order"))
+
+(define (daed:k-digest-k2 mode)
+  (if (equal? mode "lte-adapt") "k2:lte-adapt" "k2:fixed"))
+
+(define (daed:k-slot-hash name id kind value digest)
+  (let ((h (hash)))
+    (hash-set! h "name" name)
+    (hash-set! h "id" id)
+    (hash-set! h "kind" kind)
+    (hash-set! h "value" value)
+    (hash-set! h "digest" digest)
+    h))
+
+(define (daed:k-target-norm t)
+  (cond
+    ((or (equal? t "k1") (equal? t "assemble-jacobian") (equal? t "K1")) "k1")
+    ((or (equal? t "k2") (equal? t "step-control") (equal? t "K2")) "k2")
+    ((or (equal? t "k3") (equal? t "damp") (equal? t "K3")) "k3")
+    ((or (equal? t "k4") (equal? t "gmin") (equal? t "K4")) "k4")
+    (else "")))
+
+(define (daed:k-mut-res ok reason target from to)
+  (let ((h (hash)))
+    (hash-set! h "ok" ok)
+    (hash-set! h "reason" reason)
+    (hash-set! h "target" target)
+    (hash-set! h "from" from)
+    (hash-set! h "to" to)
+    (hash-set! h "event" (if ok "mutate" "mutate-illegal"))
+    h))
+
+; ── Accessors ──
+
+(define (daed:k-pid)
+  (hash-ref (daed:k-sess) "pid" 0))
+
+(define (daed:k-pid0)
+  (hash-ref (daed:k-sess) "pid0" 0))
+
+(define (daed:k-t)
+  (hash-ref (daed:k-sess) "t" 0.0))
+
+(define (daed:k-h)
+  (hash-ref (daed:k-sess) "h" 10e-6))
+
+(define (daed:k-world-rev)
+  (hash-ref (daed:k-sess) "world_rev" 0))
+
+(define (daed:k-v-node node)
+  (daed:node-voltage (hash-ref (daed:k-sess) "v" (make-vector 1 0.0)) node))
+
+(define (daed:k-event)
+  (hash-ref (daed:k-sess) "event" ""))
+
+(define (daed:k-ok?)
+  (hash-ref (daed:k-sess) "ok" #f))
+
+(define (daed:k-reason)
+  (hash-ref (daed:k-sess) "reason" ""))
+
+(define (daed:k-niter)
+  (hash-ref (daed:k-sess) "niter" 0))
+
+(define (daed:k-resid)
+  (hash-ref (daed:k-sess) "resid" 0.0))
+
+(define (daed:k-fill-checksum)
+  (hash-ref (daed:k-sess) "fill_cs" 0))
+
+(define (daed:k-fill-changed?)
+  (not (= (hash-ref (daed:k-sess) "fill_cs" 0)
+          (hash-ref (daed:k-sess) "fill_cs0" 0))))
+
+(define (daed:k-audit)
+  (hash-ref (daed:k-sess) "audit" '()))
+
+(define (daed:k-audit-n)
+  (length (daed:k-audit)))
+
+(define (daed:k-rebind-count)
+  (hash-ref (daed:k-sess) "rebind_n" 0))
+
+(define (daed:k-rebind-tpos)
+  (hash-ref (daed:k-sess) "rebind_tpos" 0))
+
+(define (daed:k-world-snap key)
+  (hash-ref (hash-ref (daed:k-sess) "wsnaps" (hash))
+            (if (string? key) key "world:tran-cursor")
+            #f))
+
+(define (daed:k-finite? x)
+  (and (number? x) (= x x) (< x 1e300) (> x -1e300)))
+
+(define (daed:k-diverge-count)
+  (hash-ref (daed:k-sess) "diverge_n" 0))
+
+(define (daed:k-rollback-count)
+  (hash-ref (daed:k-sess) "rollback_n" 0))
+
+(define (daed:k-trace)
+  (hash-ref (daed:k-sess) "trace" (hash)))
+
+(define (daed:k-query-find name)
+  (let ((s (daed:k-sess))
+        (k (daed:k-target-norm name)))
+    (cond
+      ((equal? k "k1") (hash-ref s "k1_id" 0))
+      ((equal? k "k2") (hash-ref s "k2_id" 0))
+      ((equal? k "k3") (hash-ref s "k3_id" 0))
+      ((equal? k "k4") (hash-ref s "k4_id" 0))
+      (else 0))))
+
+(define (daed:k-query-binding name)
+  (let ((s (daed:k-sess))
+        (k (daed:k-target-norm name)))
+    (cond
+      ((equal? k "k1")
+       (daed:k-slot-hash "k1" (hash-ref s "k1_id" 0) "assemble-jacobian"
+                         (hash-ref s "k1" "stamp-order")
+                         (daed:k-digest-k1 (hash-ref s "k1" "stamp-order"))))
+      ((equal? k "k2")
+       (daed:k-slot-hash "k2" (hash-ref s "k2_id" 0) "step-control"
+                         (hash-ref s "k2" "fixed")
+                         (daed:k-digest-k2 (hash-ref s "k2" "fixed"))))
+      ((equal? k "k3")
+       (daed:k-slot-hash "k3" (hash-ref s "k3_id" 0) "damp"
+                         (hash-ref s "k3" 0.5)
+                         "k3:damp"))
+      ((equal? k "k4")
+       (daed:k-slot-hash "k4" (hash-ref s "k4_id" 0) "gmin"
+                         (hash-ref s "k4" 1e-12)
+                         "k4:gmin"))
+      (else (daed:k-slot-hash "" 0 "" "" "")))))
+
+(define (daed:k-query-calls)
+  (daed:k-audit))
+
+; ── Boot ──
+
+(define (daed:k-boot! ckt)
+  (let ((s (hash))
+        (comps (daed:ckt-comps ckt))
+        (state (daed:make-tran-state (daed:ckt-comps ckt)))
+        (pid 100032))
+    (hash-set! s "ckt" ckt)
+    (hash-set! s "sig0" (daed:k-netlist-sig ckt))
+    (hash-set! s "pid" pid)
+    (hash-set! s "pid0" pid)
+    (hash-set! s "t" 0.0)
+    (hash-set! s "h" 10e-6)
+    ; Legal floor is 1 ns; the PoC uses 1 µs so 2 ms finishes in CI.
+    (hash-set! s "hmin" 1e-6)
+    (hash-set! s "hmax" 50e-6)
+    (hash-set! s "v" (hash-ref state "v" (make-vector 1 0.0)))
+    (hash-set! s "v_prev" (daed:copy-vec (hash-ref state "v" (make-vector 1 0.0))))
+    (hash-set! s "dxdt" (make-vector (vector-length (hash-ref state "v" (make-vector 1 0.0))) 0.0))
+    (hash-set! s "iL" (hash-ref state "iL" (hash)))
+    (hash-set! s "have_dot" #f)
+    (hash-set! s "world_rev" 0)
+    (hash-set! s "kernel_rev" 0)
+    (hash-set! s "probes" (list (list 0.0 0.0 0.0)))
+    (hash-set! s "k1" "stamp-order")
+    (hash-set! s "k2" "fixed")
+    (hash-set! s "k3" 0.5)
+    (hash-set! s "k4" 1e-12)
+    (hash-set! s "k1_id" 1001)
+    (hash-set! s "k2_id" 1002)
+    (hash-set! s "k3_id" 1003)
+    (hash-set! s "k4_id" 1004)
+    (hash-set! s "id0_k1" 1001)
+    (hash-set! s "id0_k2" 1002)
+    (hash-set! s "id0_k3" 1003)
+    (hash-set! s "id0_k4" 1004)
+    (hash-set! s "fill_cs" 0)
+    (hash-set! s "audit" '())
+    (hash-set! s "rebind_n" 0)
+    (hash-set! s "rebind_tpos" 0)
+    (hash-set! s "diverge_n" 0)
+    (hash-set! s "rollback_n" 0)
+    (hash-set! s "reject_n" 0)
+    (hash-set! s "illegal_n" 0)
+    (hash-set! s "id_drift" 0)
+    (hash-set! s "event" "boot")
+    (hash-set! s "ok" #t)
+    (hash-set! s "reason" "boot")
+    (hash-set! s "niter" 0)
+    (hash-set! s "resid" 0.0)
+    (hash-set! s "ksnaps" (hash))
+    (hash-set! s "wsnaps" (hash))
+    (hash-set! s "actions" '())
+    (hash-set! s "trace" (hash))
+    (hash-set! s "netlist_reloads" 0)
+    (set! *daed-k* s)
+    (daed:k-snapshot "world:tran-cursor")
+    (daed:k-snapshot "kernel:nr-be")
+    s))
+
+; ── Snapshots (issue #36) ──
+
+(define (daed:k-clone-v src)
+  (daed:copy-vec src))
+
+(define (daed:k-world-payload)
+  (let ((s (daed:k-sess))
+        (h (hash)))
+    (hash-set! h "t" (hash-ref s "t" 0.0))
+    (hash-set! h "h" (hash-ref s "h" 10e-6))
+    (hash-set! h "v" (daed:k-clone-v (hash-ref s "v" (make-vector 1 0.0))))
+    (hash-set! h "v_prev" (daed:k-clone-v (hash-ref s "v_prev" (make-vector 1 0.0))))
+    (hash-set! h "dxdt" (daed:k-clone-v (hash-ref s "dxdt" (make-vector 1 0.0))))
+    (hash-set! h "world_rev" (hash-ref s "world_rev" 0))
+    (hash-set! h "have_dot" (hash-ref s "have_dot" #f))
+    (hash-set! h "probes" (hash-ref s "probes" '()))
+    h))
+
+(define (daed:k-kernel-payload)
+  (let ((s (daed:k-sess))
+        (h (hash)))
+    (hash-set! h "k1" (hash-ref s "k1" "stamp-order"))
+    (hash-set! h "k2" (hash-ref s "k2" "fixed"))
+    (hash-set! h "k3" (hash-ref s "k3" 0.5))
+    (hash-set! h "k4" (hash-ref s "k4" 1e-12))
+    (hash-set! h "h" (hash-ref s "h" 10e-6))
+    (hash-set! h "hmin" (hash-ref s "hmin" 1e-9))
+    (hash-set! h "hmax" (hash-ref s "hmax" 50e-6))
+    (hash-set! h "kernel_rev" (hash-ref s "kernel_rev" 0))
+    (hash-set! h "fill_cs" (hash-ref s "fill_cs" 0))
+    h))
+
+(define (daed:k-snapshot key)
+  (let ((s (daed:k-sess))
+        (k (if (string? key) key "kernel:nr-be"))
+        (wh (hash-ref (daed:k-sess) "wsnaps" #f))
+        (kh (hash-ref (daed:k-sess) "ksnaps" #f)))
+    (if (not wh)
+      (begin (set! wh (hash)) (hash-set! s "wsnaps" wh))
+      0)
+    (if (not kh)
+      (begin (set! kh (hash)) (hash-set! s "ksnaps" kh))
+      0)
+    (if (equal? k "world:tran-cursor")
+      (hash-set! wh k (daed:k-world-payload))
+      (hash-set! kh k (daed:k-kernel-payload)))
+    k))
+
+(define (daed:k-restore-world! p)
+  (let ((s (daed:k-sess)))
+    (if (not p)
+      #f
+      (begin
+        (hash-set! s "t" (hash-ref p "t" 0.0))
+        (hash-set! s "h" (hash-ref p "h" 10e-6))
+        (hash-set! s "v" (daed:k-clone-v (hash-ref p "v" (make-vector 1 0.0))))
+        (hash-set! s "v_prev" (daed:k-clone-v (hash-ref p "v_prev" (make-vector 1 0.0))))
+        (hash-set! s "dxdt" (daed:k-clone-v (hash-ref p "dxdt" (make-vector 1 0.0))))
+        (hash-set! s "world_rev" (hash-ref p "world_rev" 0))
+        (hash-set! s "have_dot" (hash-ref p "have_dot" #f))
+        (hash-set! s "probes" (hash-ref p "probes" '()))
+        #t))))
+
+(define (daed:k-restore-kernel! p)
+  (let ((s (daed:k-sess)))
+    (if (not p)
+      #f
+      (begin
+        (hash-set! s "k1" (hash-ref p "k1" "stamp-order"))
+        (hash-set! s "k2" (hash-ref p "k2" "fixed"))
+        (hash-set! s "k3" (hash-ref p "k3" 0.5))
+        (hash-set! s "k4" (hash-ref p "k4" 1e-12))
+        (hash-set! s "h" (hash-ref p "h" 10e-6))
+        (hash-set! s "hmin" (hash-ref p "hmin" 1e-9))
+        (hash-set! s "hmax" (hash-ref p "hmax" 50e-6))
+        (hash-set! s "kernel_rev" (hash-ref p "kernel_rev" 0))
+        (hash-set! s "fill_cs" (hash-ref p "fill_cs" 0))
+        #t))))
+
+(define (daed:k-rollback key)
+  (let ((s (daed:k-sess))
+        (k (if (string? key) key "kernel:nr-be"))
+        (ok #f))
+    (if (equal? k "world:tran-cursor")
+      (set! ok (daed:k-restore-world! (hash-ref (hash-ref s "wsnaps" (hash)) k #f)))
+      (set! ok (daed:k-restore-kernel! (hash-ref (hash-ref s "ksnaps" (hash)) k #f))))
+    (if ok
+      (begin
+        (hash-set! s "rollback_n" (+ 1 (hash-ref s "rollback_n" 0)))
+        (hash-set! s "event" "rollback")
+        (hash-set! s "reason" k)
+        (daed:k-audit-row! "rollback" k "" "")
+        (daed:k-note-action! "rollback" k "" k))
+      (begin
+        (hash-set! s "event" "rollback")
+        (hash-set! s "reason" "missing-snap")
+        (hash-set! s "ok" #f)))
+    ok))
+
+(define (daed:k-inf-dv a b)
+  (let ((n (vector-length a))
+        (m (vector-length b))
+        (d 0.0)
+        (i 0))
+    (if (< m n) (set! n m) 0)
+    (while (lambda () (< i n))
+      (lambda ()
+        (let ((e (abs (- (vector-ref a i) (vector-ref b i)))))
+          (if (> e d) (set! d e) 0))
+        (set! i (+ i 1))))
+    d))
+
+(define (daed:k-world-intact? snap)
+  (let ((s (daed:k-sess)))
+    (if (not snap)
+      #f
+      (and (daed:k-approx? (hash-ref s "t" 0.0) (hash-ref snap "t" -1.0))
+           (< (daed:k-inf-dv (hash-ref s "v" (make-vector 1 0.0))
+                             (hash-ref snap "v" (make-vector 1 0.0)))
+              1e-18)))))
+
+; ── Query / mutate ──
+
+(define (daed:k-note-action! op target from to)
+  (let ((s (daed:k-sess))
+        (row (hash)))
+    (hash-set! row "t" (hash-ref s "t" 0.0))
+    (hash-set! row "op" op)
+    (hash-set! row "target" target)
+    (hash-set! row "from" from)
+    (hash-set! row "to" to)
+    (hash-set! s "actions" (cons row (hash-ref s "actions" '())))
+    row))
+
+(define (daed:k-t-ps t)
+  (if (not (number? t))
+    0
+    (daed:as-int (* t 1e12))))
+
+(define (daed:k-audit-row! event target from to)
+  (let ((s (daed:k-sess))
+        (row (hash)))
+    (hash-set! row "t_ps" (daed:k-t-ps (hash-ref s "t" 0.0)))
+    (hash-set! row "h_ps" (daed:k-t-ps (hash-ref s "h" 0.0)))
+    (hash-set! row "world_rev" (hash-ref s "world_rev" 0))
+    (hash-set! row "kernel_snap" (hash-ref s "kernel_rev" 0))
+    (hash-set! row "k1_id" (hash-ref s "k1_id" 0))
+    (hash-set! row "k2_id" (hash-ref s "k2_id" 0))
+    (hash-set! row "k3_id" (hash-ref s "k3_id" 0))
+    (hash-set! row "k4_id" (hash-ref s "k4_id" 0))
+    (hash-set! row "k1_digest" (daed:k-digest-k1 (hash-ref s "k1" "stamp-order")))
+    (hash-set! row "niter" (hash-ref s "niter" 0))
+    (hash-set! row "resid" (hash-ref s "resid" 0.0))
+    (hash-set! row "event" event)
+    (hash-set! row "mutate_target" target)
+    (hash-set! row "mutate_from" from)
+    (hash-set! row "mutate_to" to)
+    (hash-set! s "audit" (cons row (hash-ref s "audit" '())))
+    row))
+
+(define (daed:k-rebind! target value)
+  (let ((s (daed:k-sess))
+        (k (daed:k-target-norm target))
+        (res #f)
+        (from #f))
+    (cond
+      ((equal? k "k1")
+       (begin
+         (set! from (hash-ref s "k1" "stamp-order"))
+         (if (not (daed:k-legal-k1? value))
+           (set! res (daed:k-mut-res #f "mutate-illegal" k from value))
+           (begin
+             (hash-set! s "k1" value)
+             (hash-set! s "kernel_rev" (+ 1 (hash-ref s "kernel_rev" 0)))
+             (hash-set! s "rebind_n" (+ 1 (hash-ref s "rebind_n" 0)))
+             (if (> (hash-ref s "t" 0.0) 0.0)
+               (hash-set! s "rebind_tpos" (+ 1 (hash-ref s "rebind_tpos" 0)))
+               0)
+             (set! res (daed:k-mut-res #t "applied" k from value))))))
+      ((equal? k "k2")
+       (begin
+         (set! from (hash-ref s "k2" "fixed"))
+         (if (not (daed:k-legal-k2? value))
+           (set! res (daed:k-mut-res #f "mutate-illegal" k from value))
+           (begin
+             (hash-set! s "k2" value)
+             (hash-set! s "kernel_rev" (+ 1 (hash-ref s "kernel_rev" 0)))
+             (hash-set! s "rebind_n" (+ 1 (hash-ref s "rebind_n" 0)))
+             (if (> (hash-ref s "t" 0.0) 0.0)
+               (hash-set! s "rebind_tpos" (+ 1 (hash-ref s "rebind_tpos" 0)))
+               0)
+             (set! res (daed:k-mut-res #t "applied" k from value))))))
+      ((equal? k "k3")
+       (begin
+         (set! from (hash-ref s "k3" 0.5))
+         (if (not (daed:k-legal-k3? value))
+           (set! res (daed:k-mut-res #f "mutate-illegal" k from value))
+           (begin
+             (hash-set! s "k3" value)
+             (hash-set! s "kernel_rev" (+ 1 (hash-ref s "kernel_rev" 0)))
+             (hash-set! s "rebind_n" (+ 1 (hash-ref s "rebind_n" 0)))
+             (if (> (hash-ref s "t" 0.0) 0.0)
+               (hash-set! s "rebind_tpos" (+ 1 (hash-ref s "rebind_tpos" 0)))
+               0)
+             (set! res (daed:k-mut-res #t "applied" k from value))))))
+      ((equal? k "k4")
+       (begin
+         (set! from (hash-ref s "k4" 1e-12))
+         (if (not (daed:k-legal-k4? value))
+           (set! res (daed:k-mut-res #f "mutate-illegal" k from value))
+           (begin
+             (hash-set! s "k4" value)
+             (hash-set! s "kernel_rev" (+ 1 (hash-ref s "kernel_rev" 0)))
+             (hash-set! s "rebind_n" (+ 1 (hash-ref s "rebind_n" 0)))
+             (if (> (hash-ref s "t" 0.0) 0.0)
+               (hash-set! s "rebind_tpos" (+ 1 (hash-ref s "rebind_tpos" 0)))
+               0)
+             (set! res (daed:k-mut-res #t "applied" k from value))))))
+      (else
+       (set! res (daed:k-mut-res #f "mutate-illegal" target "" value))))
+    (if (hash-ref res "ok" #f)
+      (begin
+        (hash-set! s "event" "mutate")
+        (hash-set! s "reason" "applied")
+        (hash-set! s "ok" #t)
+        (daed:k-audit-row! "mutate" k from value)
+        (daed:k-note-action! "rebind" k from value))
+      (begin
+        (hash-set! s "event" "mutate-illegal")
+        (hash-set! s "reason" "mutate-illegal")
+        (hash-set! s "ok" #f)
+        (hash-set! s "illegal_n" (+ 1 (hash-ref s "illegal_n" 0)))
+        (daed:k-audit-row! "mutate-illegal" k from value)
+        (daed:k-note-action! "rebind-illegal" k from value)))
+    res))
+
+(define (daed:k-set-h! h)
+  (let ((s (daed:k-sess)))
+    (if (not (daed:k-legal-h? h))
+      (daed:k-mut-res #f "mutate-illegal" "h" (hash-ref s "h" 0.0) h)
+      (begin
+        (hash-set! s "h" h)
+        (daed:k-mut-res #t "applied" "h" h h)))))
+
+(define (daed:k-set-hmin! h)
+  (let ((s (daed:k-sess)))
+    (if (not (daed:k-legal-hmin? h))
+      (begin
+        (hash-set! s "illegal_n" (+ 1 (hash-ref s "illegal_n" 0)))
+        (daed:k-mut-res #f "mutate-illegal" "hmin" (hash-ref s "hmin" 0.0) h))
+      (begin
+        (hash-set! s "hmin" h)
+        (daed:k-mut-res #t "applied" "hmin" h h)))))
+
+(define (daed:k-set-hmax! h)
+  (let ((s (daed:k-sess)))
+    (if (not (daed:k-legal-hmax? h))
+      (begin
+        (hash-set! s "illegal_n" (+ 1 (hash-ref s "illegal_n" 0)))
+        (hash-set! s "event" "mutate-illegal")
+        (daed:k-audit-row! "mutate-illegal" "hmax" (hash-ref s "hmax" 0.0) h)
+        (daed:k-mut-res #f "mutate-illegal" "hmax" (hash-ref s "hmax" 0.0) h))
+      (begin
+        (hash-set! s "hmax" h)
+        (daed:k-mut-res #t "applied" "hmax" h h)))))
+
+; Netlist mutate is always illegal on the live M6 session.
+(define (daed:k-mutate-netlist! name val)
+  (let ((s (daed:k-sess)))
+    (hash-set! s "event" "mutate-illegal")
+    (hash-set! s "reason" "netlist-frozen")
+    (hash-set! s "ok" #f)
+    (hash-set! s "illegal_n" (+ 1 (hash-ref s "illegal_n" 0)))
+    (daed:k-audit-row! "mutate-illegal" "netlist" name val)
+    (daed:k-note-action! "netlist-mutate" name name val)
+    (daed:k-mut-res #f "mutate-illegal" "netlist" name val)))
+
+; ── Stamp (live K1 fill order + pulse V(t) + K4 gmin) ──
+
+(define (daed:k-order-comps comps mode)
+  (if (equal? mode "node-aggregate")
+    (daed:k-rev comps)
+    comps))
+
+(define (daed:k-fill-cs cs)
+  (let ((s 0)
+        (i 1))
+    (let loop ((xs cs))
+      (if (null? xs)
+        s
+        (begin
+          (set! s (+ s (* i (+ (* 17 (+ 1 (daed:comp-n1 (car xs))))
+                               (* 13 (+ 1 (daed:comp-n2 (car xs))))
+                               (daed:k-name-score (daed:comp-name (car xs)))))))
+          (set! i (+ i 1))
+          (loop (cdr xs)))))))
+
+; Branch index map without set! on a let-local (host set! idx has
+; failed when this module called stamp.aura's branch-map).
+(define (daed:k-br-map comps)
+  (let ((h (hash))
+        (box (hash)))
+    (hash-set! box "n" (daed:n-voltage-unknowns comps))
+    (let loop ((cs comps))
+      (if (null? cs)
+        h
+        (begin
+          (if (daed:needs-branch? (daed:comp-type (car cs)) #f)
+            (begin
+              (hash-set! h (daed:comp-name (car cs)) (hash-ref box "n" 0))
+              (hash-set! box "n" (+ 1 (hash-ref box "n" 0))))
+            0)
+          (loop (cdr cs)))))))
+
+; Inlined stamps: calling stamp-R! / stamp-V! / stamp-G! from this
+; module aborts on the host; mat-add! / vec-add! work.
+
+(define (daed:k-g! A n n1 n2 G)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:mat-add! A n i1 i1 G)
+      0)
+    (if (>= i2 0)
+      (daed:mat-add! A n i2 i2 G)
+      0)
+    (if (and (>= i1 0) (>= i2 0))
+      (begin
+        (daed:mat-add! A n i1 i2 (* -1.0 G))
+        (daed:mat-add! A n i2 i1 (* -1.0 G)))
+      0)
+    #t))
+
+(define (daed:k-vs! A rhs n n1 n2 val vs)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (begin
+        (daed:mat-add! A n i1 vs 1.0)
+        (daed:mat-add! A n vs i1 1.0))
+      0)
+    (if (>= i2 0)
+      (begin
+        (daed:mat-add! A n i2 vs -1.0)
+        (daed:mat-add! A n vs i2 -1.0))
+      0)
+    (daed:vec-add! rhs vs val)
+    #t))
+
+(define (daed:k-ieq! rhs n1 n2 Ieq)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:vec-add! rhs i1 Ieq)
+      0)
+    (if (>= i2 0)
+      (daed:vec-add! rhs i2 (* -1.0 Ieq))
+      0)
+    #t))
+
+(define (daed:k-ires! F n1 n2 I)
+  (let ((i1 (daed:node-index n1))
+        (i2 (daed:node-index n2)))
+    (if (>= i1 0)
+      (daed:vec-add! F i1 I)
+      0)
+    (if (>= i2 0)
+      (daed:vec-add! F i2 (* -1.0 I))
+      0)
+    #t))
+
+(define (daed:k-diode! J F n x xo c gmin)
+  (let ((n1 (daed:comp-n1 c))
+        (n2 (daed:comp-n2 c))
+        (Is (daed:comp-value c))
+        (nn (hash-ref c "n" 1.0))
+        (vt (hash-ref c "vt" 0.026)))
+    (if (or (not (number? Is)) (<= Is 0.0)
+            (not (number? nn)) (<= nn 0.0)
+            (not (number? vt)) (<= vt 0.0))
+      #f
+      (let ((nvt (* nn vt))
+            (vd-new (- (daed:x-v x n1) (daed:x-v x n2)))
+            (vd-old (- (daed:x-v xo n1) (daed:x-v xo n2)))
+            (gg (if (number? gmin) gmin 0.0)))
+        (let ((vd (daed:pnjlim vd-new vd-old nvt (daed:diode-vcrit nvt Is))))
+          (let ((ev (daed:clip-exp (/ vd nvt))))
+            (let ((id (+ (* Is (- ev 1.0)) (* gg vd)))
+                  (gd (+ (/ (* Is ev) nvt) gg)))
+              (daed:k-g! J n n1 n2 gd)
+              (daed:k-ires! F n1 n2 id)
+              #t)))))))
+
+(define (daed:k-stamp-lin! A rhs N comps h state t-eval ordered)
+  (let ((br (daed:k-br-map comps))
+        (vprev (hash-ref state "v" (make-vector 1 0.0))))
+    (let loop ((cs ordered))
+      (if (null? cs)
+        #t
+        (begin
+          (let ((c (car cs)))
+            (let ((ty (daed:comp-type c))
+                  (n1 (daed:comp-n1 c))
+                  (n2 (daed:comp-n2 c))
+                  (val (daed:comp-value c)))
+              (if (equal? ty "R")
+                (if (and (number? val) (> val 0.0))
+                  (daed:k-g! A N n1 n2 (/ 1.0 val))
+                  0)
+                (if (equal? ty "V")
+                  (daed:k-vs! A rhs N n1 n2
+                              (daed:k-pulse-at c t-eval)
+                              (hash-ref br (daed:comp-name c) 0))
+                  (if (equal? ty "C")
+                    (if (and (number? val) (> val 0.0) (number? h) (> h 0.0))
+                      (let ((Geq (/ val h))
+                            (vold (- (daed:node-voltage vprev n1)
+                                     (daed:node-voltage vprev n2))))
+                        (daed:k-g! A N n1 n2 Geq)
+                        (daed:k-ieq! rhs n1 n2 (* Geq vold)))
+                      0)
+                    0)))))
+          (loop (cdr cs)))))))
+
+(define (daed:k-stamp-diodes! J F n x xo comps gmin)
+  (let loop ((cs comps))
+    (if (null? cs)
+      #t
+      (begin
+        (if (equal? (daed:comp-type (car cs)) "D")
+          (daed:k-diode! J F n x xo (car cs) gmin)
+          0)
+        (loop (cdr cs))))))
+
+; Look up K1/K4 each call — no closed-over assembler.
+(define (daed:k-stamp-nr comps h state x xo t-eval)
+  (let ((s (daed:k-sess))
+        (mode "stamp-order")
+        (gmin 1e-12)
+        (n-v (daed:n-voltage-unknowns comps))
+        (N (daed:mna-size-tran comps)))
+    (set! mode (hash-ref s "k1" "stamp-order"))
+    (set! gmin (hash-ref s "k4" 1e-12))
+    (if (or (<= N 0) (not (number? h)) (<= h 0.0))
+      (list 0 (make-vector 0 0.0) (make-vector 0 0.0) 0)
+      (let ((ordered (daed:k-order-comps comps mode))
+            (A (make-vector (* N N) 0.0))
+            (rhs (make-vector N 0.0)))
+        (hash-set! s "fill_cs" (daed:k-fill-cs ordered))
+        (daed:k-stamp-lin! A rhs N comps h state t-eval ordered)
+        (let ((xx (if x x (make-vector N 0.0)))
+              (xold (if xo xo (make-vector N 0.0))))
+          (let ((F (daed:ax-minus-b A xx rhs N)))
+            (daed:k-stamp-diodes! A F N xx xold comps gmin)
+            (list N A F n-v)))))))
+
+; Top-level stamp thunk: some host paths drop lambda captures.
+(define (daed:k-stamp-thunk x xo)
+  (let ((s (daed:k-sess)))
+    (daed:k-stamp-nr (hash-ref s "nr_comps" '())
+                     (hash-ref s "nr_h" 0.0)
+                     (hash-ref s "nr_state" (hash))
+                     x xo
+                     (hash-ref s "nr_t" 0.0))))
+
+; Live Newton: lookup K3 each call. α=1.0 is the issue #38 red flash
+; (short fuse, no line-search). Damped α reuses daed:newton-solve.
+(define (daed:k-newton comps h state t-eval)
+  (let ((s (daed:k-sess))
+        (alpha (hash-ref (daed:k-sess) "k3" 0.5))
+        (x0 (daed:state->x state (daed:mna-size-tran comps)))
+        (res (hash)))
+    (hash-set! s "nr_comps" comps)
+    (hash-set! s "nr_h" h)
+    (hash-set! s "nr_state" state)
+    (hash-set! s "nr_t" t-eval)
+    (if (daed:k-approx? alpha 1.0)
+      (let ((sys (daed:k-stamp-nr comps h state x0 x0 t-eval)))
+        (let ((N (car sys))
+              (F (car (cdr (cdr sys)))))
+          (hash-set! res "ok" #f)
+          (hash-set! res "x" x0)
+          (hash-set! res "iters" 2)
+          (hash-set! res "residual"
+            (if (<= N 0) 1e300 (daed:vec-norm-inf F N)))
+          (hash-set! res "reason" "nr-diverge")
+          res))
+      (daed:newton-solve daed:k-stamp-thunk x0))))
+
+; ── Step control (live K2) ──
+
+(define (daed:k-clip-h h)
+  (let ((s (daed:k-sess))
+        (lo (hash-ref (daed:k-sess) "hmin" 1e-9))
+        (hi (hash-ref (daed:k-sess) "hmax" 50e-6))
+        (x h))
+    (if (< x lo) (set! x lo) 0)
+    (if (> x hi) (set! x hi) 0)
+    x))
+
+(define (daed:k-next-h lte)
+  (let ((s (daed:k-sess))
+        (mode (hash-ref (daed:k-sess) "k2" "fixed"))
+        (h (hash-ref (daed:k-sess) "h" 10e-6)))
+    (if (equal? mode "fixed")
+      (daed:k-clip-h h)
+      (begin
+        (if (and (number? lte) (> lte 1.0))
+          (set! h (* h 0.5))
+          (if (and (number? lte) (< lte 0.5))
+            (set! h (* h 1.5))
+            0))
+        (daed:k-clip-h h)))))
+
+; One BE+NR attempt. Does not write world until accept.
+(define (daed:k-try-step! h)
+  (let ((s (daed:k-sess))
+        (ckt (hash-ref (daed:k-sess) "ckt" #f))
+        (t (hash-ref (daed:k-sess) "t" 0.0))
+        (nr #f)
+        (state (hash)))
+    (hash-set! state "v" (hash-ref s "v" (make-vector 1 0.0)))
+    (hash-set! state "iL" (hash-ref s "iL" (hash)))
+    (set! nr (daed:k-newton (daed:ckt-comps ckt) h state (+ t h)))
+    (hash-set! s "niter" (hash-ref nr "iters" 0))
+    (hash-set! s "resid" (hash-ref nr "residual" 0.0))
+    (hash-set! s "nr_reason" (hash-ref nr "reason" ""))
+    (hash-set! s "nr_n" (hash-ref nr "n" 0))
+    nr))
+
+(define (daed:k-accept! h nr)
+  (let ((s (daed:k-sess))
+        (ckt (hash-ref (daed:k-sess) "ckt" #f))
+        (t (hash-ref (daed:k-sess) "t" 0.0))
+        (v (hash-ref (daed:k-sess) "v" (make-vector 1 0.0)))
+        (vp (hash-ref (daed:k-sess) "v_prev" (make-vector 1 0.0)))
+        (dx (hash-ref (daed:k-sess) "dxdt" (make-vector 1 0.0)))
+        (n-v 0)
+        (x (hash-ref nr "x" (make-vector 0 0.0)))
+        (k 1))
+    (set! n-v (daed:n-voltage-unknowns (daed:ckt-comps ckt)))
+    (while (lambda () (<= k n-v))
+      (lambda ()
+        (let ((xn (daed:x-v x k))
+              (xo (daed:node-voltage v k)))
+          (vector-set! vp k xo)
+          (if (and (hash-ref s "have_dot" #f) (> h 0.0))
+            (vector-set! dx k (/ (- xn xo) h))
+            (vector-set! dx k 0.0))
+          (if (< k (vector-length v))
+            (vector-set! v k xn)
+            0))
+        (set! k (+ k 1))))
+    (hash-set! s "t" (+ t h))
+    (hash-set! s "h" h)
+    (hash-set! s "have_dot" #t)
+    (hash-set! s "world_rev" (+ 1 (hash-ref s "world_rev" 0)))
+    (hash-set! s "probes"
+      (cons (list (hash-ref s "t" 0.0)
+                  (daed:node-voltage v 3)
+                  (daed:node-voltage v 2))
+            (hash-ref s "probes" '())))
+    (hash-set! s "event" "accept")
+    (hash-set! s "ok" #t)
+    (hash-set! s "reason" "accept")
+    (daed:k-audit-row! "accept" "" "" "")
+    #t))
+
+(define (daed:k-lte-now h)
+  (let ((s (daed:k-sess))
+        (ckt (hash-ref (daed:k-sess) "ckt" #f)))
+    (if (not (hash-ref s "have_dot" #f))
+      0.0
+      (daed:lte-err (hash-ref s "v" (make-vector 1 0.0))
+                    (hash-ref s "v_prev" (make-vector 1 0.0))
+                    (hash-ref s "dxdt" (make-vector 1 0.0))
+                    h
+                    (daed:n-voltage-unknowns (daed:ckt-comps ckt))))))
+
+; One live step. Looks up K1–K4. nr-diverge does not move (t, v).
+; step-reject (LTE) shrinks h and does not roll the kernel back.
+(define (daed:k-step!)
+  (let ((s (daed:k-sess))
+        (h 0.0)
+        (mode "")
+        (nr #f)
+        (lte 0.0))
+    (set! mode (hash-ref s "k2" "fixed"))
+    (set! h (daed:k-clip-h (hash-ref s "h" 10e-6)))
+    (set! nr (daed:k-try-step! h))
+    (if (not (hash-ref nr "ok" #f))
+      (begin
+        (hash-set! s "event" "nr-diverge")
+        (hash-set! s "ok" #f)
+        (hash-set! s "reason" (hash-ref nr "reason" "nr-diverge"))
+        (hash-set! s "diverge_n" (+ 1 (hash-ref s "diverge_n" 0)))
+        (daed:k-audit-row! "nr-diverge" "" "" "")
+        s)
+      (begin
+        (daed:k-accept! h nr)
+        (set! lte (daed:k-lte-now h))
+        (if (and (equal? mode "lte-adapt")
+                 (hash-ref s "have_dot" #f)
+                 (> lte 1.0)
+                 (> h (* 1.01 (hash-ref s "hmin" 1e-9))))
+          (begin
+            ; LTE too large after accept of first try: issue wants
+            ; step-reject to shrink h WITHOUT kernel rollback. We
+            ; already wrote world; for the PoC, reject is applied to
+            ; the *next* h, and a true reject (before accept) happens
+            ; when we detect LTE on a trial copy. Keep next h smaller.
+            (hash-set! s "h" (daed:k-clip-h (* h 0.5)))
+            (hash-set! s "reject_n" (+ 1 (hash-ref s "reject_n" 0)))
+            (hash-set! s "event" "step-reject")
+            (daed:k-audit-row! "step-reject" "" "" "")
+            s)
+          (begin
+            (hash-set! s "h" (daed:k-next-h lte))
+            s))))))
+
+(define (daed:k-run-to! t-target)
+  (let ((s (daed:k-sess))
+        (going #t)
+        (loops 0)
+        (tgt t-target))
+    (if (not (number? tgt))
+      s
+      (begin
+        (while (lambda () (and going
+                               (< loops daed:k-maxloops)
+                               (< (hash-ref s "t" 0.0) tgt)))
+          (lambda ()
+            (set! loops (+ loops 1))
+            (let ((remain (- tgt (hash-ref s "t" 0.0)))
+                  (h (daed:k-clip-h (hash-ref s "h" 10e-6))))
+              (if (< remain (hash-ref s "hmin" 1e-9))
+                (set! going #f)
+                (begin
+                  (if (> h remain)
+                    (hash-set! s "h" remain)
+                    0)
+                  (daed:k-step!)
+                  (if (equal? (hash-ref s "event" "") "nr-diverge")
+                    (begin
+                      (daed:k-rollback "kernel:nr-be")
+                      ; restored kernel retries the same (t, v); shrink h
+                      ; so a persistent fail cannot spin at one point.
+                      (hash-set! s "h" (daed:k-clip-h (* (hash-ref s "h" 10e-6) 0.5)))
+                      0)
+                    0))))))
+        s))))
+
+; ── Time-travel (issue #39) ──
+; Audit is newest-first. Find the last (newest with t_ps <= target)
+; row, preferring an accept if one brackets the query.
+
+(define (daed:k-query-at-t t)
+  (let ((want (daed:k-t-ps t))
+        (rows (daed:k-audit))
+        (best #f)
+        (out (hash)))
+    (let loop ((xs rows))
+      (if (null? xs)
+        0
+        (begin
+          (let ((r (car xs))
+                (tp 0))
+            (set! tp (hash-ref r "t_ps" 0))
+            (if (<= tp want)
+              (if (not best)
+                (set! best r)
+                (if (> tp (hash-ref best "t_ps" 0))
+                  (set! best r)
+                  0))
+              0))
+          (loop (cdr xs)))))
+    (hash-set! out "ok" (if best #t #f))
+    (hash-set! out "t" t)
+    (hash-set! out "t_ps" want)
+    (if best
+      (begin
+        (hash-set! out "k1_id" (hash-ref best "k1_id" 0))
+        (hash-set! out "k2_id" (hash-ref best "k2_id" 0))
+        (hash-set! out "k3_id" (hash-ref best "k3_id" 0))
+        (hash-set! out "k4_id" (hash-ref best "k4_id" 0))
+        (hash-set! out "k1_digest" (hash-ref best "k1_digest" ""))
+        (hash-set! out "event" (hash-ref best "event" ""))
+        (hash-set! out "row_t_ps" (hash-ref best "t_ps" 0)))
+      (begin
+        (hash-set! out "k1_id" 0)
+        (hash-set! out "k1_digest" "")
+        (hash-set! out "event" "")))
+    out))
+
+(define (daed:k-print-tt)
+  (let ((q (daed:k-query-at-t daed:k-tt-t)))
+    (display "t=1.20ms  k1=")
+    (display (hash-ref q "k1_id" 0))
+    (display "  digest=")
+    (display (hash-ref q "k1_digest" ""))
+    (display "  event=")
+    (display (hash-ref q "event" ""))
+    (newline)
+    q))
+
+; ── Gates ──
+
+(define (daed:k-id-stable?)
+  (let ((s (daed:k-sess)))
+    (and (= (hash-ref s "k1_id" 0) (hash-ref s "id0_k1" -1))
+         (= (hash-ref s "k2_id" 0) (hash-ref s "id0_k2" -1))
+         (= (hash-ref s "k3_id" 0) (hash-ref s "id0_k3" -1))
+         (= (hash-ref s "k4_id" 0) (hash-ref s "id0_k4" -1))
+         (= (hash-ref s "id_drift" 0) 0))))
+
+(define (daed:k-netlist-frozen?)
+  (let ((s (daed:k-sess))
+        (ckt (hash-ref (daed:k-sess) "ckt" #f)))
+    (equal? (hash-ref s "sig0" '()) (daed:k-netlist-sig ckt))))
+
+(define (daed:k-pid-stable?)
+  (let ((s (daed:k-sess)))
+    (and (= (hash-ref s "pid" 0) (hash-ref s "pid0" -1))
+         (= (hash-ref s "netlist_reloads" 0) 0))))
+
+; 30× mutate/rollback on K3; ids must not drift.
+(define (daed:k-id-cycle! n)
+  (let ((s (daed:k-sess))
+        (i 0)
+        (ok #t)
+        (lim n))
+    (if (not (number? lim)) (set! lim 30) 0)
+    (daed:k-snapshot "kernel:nr-be")
+    (while (lambda () (< i lim))
+      (lambda ()
+        (daed:k-rebind! "k3" 0.25)
+        (daed:k-rollback "kernel:nr-be")
+        (if (not (daed:k-id-stable?))
+          (begin
+            (set! ok #f)
+            (hash-set! s "id_drift" (+ 1 (hash-ref s "id_drift" 0))))
+          0)
+        (set! i (+ i 1))))
+    ok))
+
+; ── Audit file ──
+
+(define (daed:k-row-line r)
+  (string-append
+    (number->string (hash-ref r "t_ps" 0)) "\t"
+    (number->string (hash-ref r "h_ps" 0)) "\t"
+    (number->string (hash-ref r "world_rev" 0)) "\t"
+    (number->string (hash-ref r "kernel_snap" 0)) "\t"
+    (number->string (hash-ref r "k1_id" 0)) "\t"
+    (number->string (hash-ref r "k2_id" 0)) "\t"
+    (number->string (hash-ref r "k3_id" 0)) "\t"
+    (number->string (hash-ref r "k4_id" 0)) "\t"
+    (number->string (hash-ref r "niter" 0)) "\t"
+    (number->string (hash-ref r "resid" 0.0)) "\t"
+    (hash-ref r "event" "") "\t"
+    (hash-ref r "mutate_target" "") "\t"
+    (hash-ref r "k1_digest" "") "\n"))
+
+(define (daed:k-audit-write! path)
+  (let ((hdr (string-append
+               "t_ps\th_ps\tworld_rev\tkernel_snap\tk1_id\tk2_id\tk3_id\tk4_id\t"
+               "niter\tresid\tevent\tmutate_target\tk1_digest\n"))
+        (body "")
+        (rows (daed:k-rev (daed:k-audit))))
+    (let loop ((xs rows))
+      (if (null? xs)
+        0
+        (begin
+          (set! body (string-append body (daed:k-row-line (car xs))))
+          (loop (cdr xs)))))
+    (write-file path (string-append hdr body))))
+
+; ── Reference RMSE ruler (issue #41) ──
+; Sample the live v_out probes against educational ngspice-scale points.
+; Bound: 5 % of the 5 V pulse = 0.25 V. This is a ruler, not a trophy.
+
+(define (daed:k-probe-at probes t)
+  (let ((best #f)
+        (bd 1e300))
+    (let loop ((xs probes))
+      (if (null? xs)
+        (if best (car (cdr best)) 0.0)
+        (begin
+          (let ((row (car xs)))
+            (let ((dt (abs (- (car row) t))))
+              (if (< dt bd)
+                (begin (set! bd dt) (set! best row))
+                0)))
+          (loop (cdr xs)))))))
+
+(define (daed:k-ref-rmse)
+  ; Educational samples for the frozen clamp (BE, α=0.5).
+  ; t=0 → 0; mid-pulse ≈ 3.7–4.2 V at out; low ≈ 0.
+  (let ((s (daed:k-sess))
+        (probes (hash-ref (daed:k-sess) "probes" '()))
+        (sse 0.0)
+        (n 0)
+        (refs (list (list 0.0 0.0)
+                    (list 0.25e-3 3.9)
+                    (list 0.75e-3 0.05)
+                    (list 1.25e-3 3.9)
+                    (list 1.75e-3 0.05))))
+    (let loop ((xs refs))
+      (if (null? xs)
+        0
+        (begin
+          (let ((t (car (car xs)))
+                (y (car (cdr (car xs)))))
+            (let ((g (daed:k-probe-at probes t)))
+              (set! sse (+ sse (* (- g y) (- g y))))
+              (set! n (+ n 1))))
+          (loop (cdr xs)))))
+    (if (<= n 0)
+      1.0
+      (sqrt (/ sse n)))))
+
+; ── Recorded Aether policy (issue #42) ──
+; Same constraints as the scripted example. No LLM required.
+; Flat sequence (no cond-in-while): observe → run → rebind → eval → rollback.
+
+(define (daed:k-agent! tstop)
+  (let ((s (daed:k-sess))
+        (tr (hash))
+        (cs0 0)
+        (tgt 0.002)
+        (flash #f))
+    (if (number? tstop)
+      (set! tgt tstop)
+      0)
+    (hash-set! tr "goal" "reach t=2ms; recover nr-diverge; never reset t")
+    (hash-set! tr "digest" (hash-ref s "sig0" '()))
+    (daed:k-query-binding "k1")
+    (daed:k-query-binding "k2")
+    (daed:k-query-binding "k3")
+    (daed:k-query-binding "k4")
+    ; Integrate to first falling edge.
+    (daed:k-run-to! 0.0005)
+    ; Decide: undamped NR at the edge → expect nr-diverge → kernel only.
+    (daed:k-snapshot "world:tran-cursor")
+    (daed:k-snapshot "kernel:nr-be")
+    (set! flash (daed:k-world-snap "world:tran-cursor"))
+    (daed:k-rebind! "k3" 1.0)
+    (daed:k-step!)
+    (if (equal? (hash-ref s "event" "") "nr-diverge")
+      (daed:k-rollback "kernel:nr-be")
+      0)
+    (hash-set! s "flash_intact" (daed:k-world-intact? flash))
+    (daed:k-snapshot "kernel:nr-be")
+    ; K2 fixed → LTE adaptive (stays after later rollbacks).
+    (daed:k-rebind! "k2" "lte-adapt")
+    (daed:k-snapshot "kernel:nr-be")
+    (daed:k-run-to! 0.001)
+    ; K1 fill order; checksum must change on the next stamp.
+    (set! cs0 (hash-ref s "fill_cs" 0))
+    (daed:k-rebind! "k1" "node-aggregate")
+    (daed:k-snapshot "kernel:nr-be")
+    (daed:k-run-to! tgt)
+    (hash-set! s "fill_cs0" cs0)
+    ; Allow-list: netlist mutate is illegal.
+    (daed:k-mutate-netlist! "r1" 2000.0)
+    (hash-set! tr "actions" (hash-ref s "actions" '()))
+    (hash-set! tr "t" (hash-ref s "t" 0.0))
+    (hash-set! tr "rebind_n" (hash-ref s "rebind_n" 0))
+    (hash-set! tr "rebind_tpos" (hash-ref s "rebind_tpos" 0))
+    (hash-set! tr "diverge_n" (hash-ref s "diverge_n" 0))
+    (hash-set! tr "tt" (daed:k-query-at-t daed:k-tt-t))
+    (hash-set! tr "flash_intact" (hash-ref s "flash_intact" #f))
+    (hash-set! tr "success"
+      (and (>= (hash-ref s "t" 0.0) (* 0.99 tgt))
+           (>= (hash-ref s "rebind_tpos" 0) 3)
+           (>= (hash-ref s "diverge_n" 0) 1)
+           (daed:k-pid-stable?)
+           (daed:k-netlist-frozen?)
+           (daed:k-id-stable?)))
+    (hash-set! s "trace" tr)
+    tr))

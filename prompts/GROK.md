@@ -64,12 +64,13 @@ Primary objects under test:
 - Probe `29-buf-exchange` — Opaque copy-in/out + soak (issue #32)
 - Probe `30-native-hotswap-demo` — pure → C++ → dual rollback (issue #33)
 - Probe `31-native-op-nr` — optional native `.op` / Newton (issue #34)
+- Probe `32-live-kernel-tran` — live K1–K4 hot-swap during `.tran` (issue #35 / M6)
 - Native ABI: `extern "C"` + workspace variant + CMake/g++ (`scripts/check-native-abi.sh`, issue #29)
 - Solver: native `/`, sci literals; `.tran` via `daed:nsteps-for` / `daed:as-int` (aura#2965)
 - Vision: do not trust VLM; fixtures + repair. Live extract is `scripts/vlm-extract.py`.
-- Roadmap: M0–M4 done (issue #27). M5 #28–#34 landed.
+- Roadmap: M0–M5 done (issue #27 / #28). M6 #35–#43 landed (probe 32).
 
-**Post-M4:** M5 C++ hot-swap (metered); optional multi-agent compose, PNP / astable, richer viz.
+**Post-M6:** optional multi-agent compose, PNP / astable, richer viz. M5 C++ remains a metered escape, not the M6 protagonist.
 
 ## When generating or reviewing code
 

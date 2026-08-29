@@ -43,6 +43,7 @@ PROBES=(
   29-buf-exchange
   30-native-hotswap-demo
   31-native-op-nr
+  32-live-kernel-tran
 )
 
 pass=0

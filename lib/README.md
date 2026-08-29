@@ -10,6 +10,7 @@
 | `devices.aura` | 5 / M2 / M3 | Shockley + NPN + Level-1 NMOS; temperature scaling |
 | `solve.aura` | 1 / 5 / M0 / M1 / M3 | Dense GE + NR + Gmin/source/ptran aid chain |
 | `tran.aura` | 2 / 5 / M0 / M2 | Fixed-step BE `.tran` + LTE adaptive step control |
+| `kernel.aura` | M6 / #35 | Live K1–K4 rebind + split world/kernel snapshot + step audit |
 | `probe.aura` | 1–2 | Node voltage / series query |
 | `measure.aura` | M2 / #20 | `.measure` (max/min/avg/rms/when/rise) + CSV |
 | `step.aura` | M3 / #22 | `.step` lin/log/list + temp sweep |
@@ -31,7 +32,8 @@
 
 ```scheme
 (require "daedalus-min" all:)
-; daed:min-version => 5
+; daed:min-version => 7
+; M6: (require "kernel" all:)  ; live K1–K4, not on the default facade
 
 (define ckt
   (daed:circuit "divider"

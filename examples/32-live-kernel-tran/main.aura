@@ -1,0 +1,225 @@
+; examples/32-live-kernel-tran/main.aura
+;
+; Milestone 6 / issue #35 — live kernel hot-swap during .tran.
+; Issue #40 called this "example 26"; repo probes 26–31 are M5, so this
+; is probe 32. Same PoC: one process, frozen diode-clamp, K1–K4 rebind
+; at t > 0, nr-diverge rolls back the kernel only, audit at t = 1.20 ms.
+;
+; Axes: split world/kernel snapshot + live defines + BE+NR stepper
+;       + step audit + recorded Aether policy
+; Escapes on core path: 0
+;
+; Run: ./scripts/run-aura.sh examples/32-live-kernel-tran/main.aura
+
+(require "daedalus-min" all:)
+(require "kernel" all:)
+
+(daed:stats-reset!)
+
+(display "=== Daedalus 32-live-kernel-tran: live kernel hot-swap ===")
+(newline)
+(display "daed:min-version=")
+(display daed:min-version)
+(display " kernel=")
+(display daed:kernel-version)
+(newline)
+
+(define ver-ok (daed:check-true (and (>= daed:min-version 7)
+                                     (>= daed:kernel-version 1))))
+
+; ── Boot frozen netlist ──
+(define ckt (daed:k-poc-circuit))
+(define topo (daed:check-true (daed:topology-ok? ckt)))
+(define boot (daed:k-boot! ckt))
+(define pid0 (daed:k-pid))
+(display "pid=")
+(display pid0)
+(newline)
+
+(define boot-ok (daed:check-true (and (daed:k-ok?)
+                                      (= (daed:k-t) 0.0)
+                                      (= (daed:k-query-find "k1") 1001)
+                                      (= (daed:k-query-find "k2") 1002)
+                                      (= (daed:k-query-find "k3") 1003)
+                                      (= (daed:k-query-find "k4") 1004))))
+
+(define id-k1-0 (daed:k-query-find "k1"))
+(define id-k2-0 (daed:k-query-find "k2"))
+(define id-k3-0 (daed:k-query-find "k3"))
+(define id-k4-0 (daed:k-query-find "k4"))
+
+; ── Illegal mutates never become live ──
+(define bad-a (daed:k-rebind! "k3" 0.1))
+(define bad-a-ok (daed:check-true (not (hash-ref bad-a "ok" #t))))
+(define k3-still (daed:check-approx (hash-ref (daed:k-query-binding "k3") "value" 0.0)
+                                    0.5 1e-15))
+(define bad-h (daed:k-set-hmax! 1e-3))
+(define bad-h-ok (daed:check-true (not (hash-ref bad-h "ok" #t))))
+(define bad-nl (daed:k-mutate-netlist! "r1" 2e3))
+(define bad-nl-ok (daed:check-true (not (hash-ref bad-nl "ok" #t))))
+(define frozen0 (daed:check-true (daed:k-netlist-frozen?)))
+
+(display "illegal k3=")
+(display (hash-ref bad-a "reason" ""))
+(display " hmax=")
+(display (hash-ref bad-h "reason" ""))
+(display " netlist=")
+(display (hash-ref bad-nl "reason" ""))
+(newline)
+
+; ── 30× mutate/rollback on K3: ids must not drift ──
+(define cyc (daed:k-id-cycle! 30))
+(define cyc-ok (daed:check-true cyc))
+(define ids-ok (daed:check-true (and (daed:k-id-stable?)
+                                     (= (daed:k-query-find "k1") id-k1-0)
+                                     (= (daed:k-query-find "k2") id-k2-0)
+                                     (= (daed:k-query-find "k3") id-k3-0)
+                                     (= (daed:k-query-find "k4") id-k4-0))))
+
+(display "id-cycle ok=")
+(display cyc)
+(display " k1=")
+(display (daed:k-query-find "k1"))
+(display " k3=")
+(display (daed:k-query-find "k3"))
+(newline)
+
+; ── Kernel-only rollback leaves world byte-identical ──
+(daed:k-snapshot "world:tran-cursor")
+(daed:k-snapshot "kernel:nr-be")
+(define w0 (daed:k-world-snap "world:tran-cursor"))
+(define t-before (daed:k-t))
+(define v-before (daed:k-v-node 3))
+(daed:k-rebind! "k3" 0.25)
+(define k3-mut (daed:check-approx (hash-ref (daed:k-query-binding "k3") "value" 0.0)
+                                  0.25 1e-15))
+(define rbk (daed:k-rollback "kernel:nr-be"))
+(define world-ok (daed:check-true (and rbk
+                                      (daed:k-world-intact? w0)
+                                      (= (daed:k-t) t-before)
+                                      (daed:check-approx (daed:k-v-node 3) v-before 1e-18))))
+(define k3-back (daed:check-approx (hash-ref (daed:k-query-binding "k3") "value" 0.0)
+                                   0.5 1e-15))
+
+(display "kernel-rollback t=")
+(display (daed:k-t))
+(display " world-intact=")
+(display world-ok)
+(display " k3=")
+(display (hash-ref (daed:k-query-binding "k3") "value" 0.0))
+(newline)
+
+; ── Scripted / recorded Aether loop to 2 ms ──
+(define cs-before 0)
+(define tr (hash))
+(set! tr (daed:k-agent! 0.002))
+(daed:stats-bump! "sim_runs")
+
+(define t-end (daed:k-t))
+(define pid1 (daed:k-pid))
+(define rebinds (daed:k-rebind-tpos))
+(define diverges (daed:k-diverge-count))
+(define tt (daed:k-query-at-t 1.20e-3))
+(define tt-ok (daed:check-true (and (hash-ref tt "ok" #f)
+                                    (= (hash-ref tt "k1_id" 0) id-k1-0)
+                                    (string? (hash-ref tt "k1_digest" #f)))))
+
+(display "pid=")
+(display pid1)
+(newline)
+(daed:k-print-tt)
+(display "t-end=")
+(display t-end)
+(display " rebind_tpos=")
+(display rebinds)
+(display " diverge=")
+(display diverges)
+(display " rollback=")
+(display (daed:k-rollback-count))
+(display " fill_cs=")
+(display (daed:k-fill-checksum))
+(newline)
+
+(define t-ok (daed:check-true (>= t-end 1.98e-3)))
+(define pid-ok (daed:check-true (and (daed:k-pid-stable?)
+                                     (= pid0 pid1))))
+(define hot-ok (daed:check-true (>= rebinds 3)))
+(define div-ok (daed:check-true (>= diverges 1)))
+(define frozen1 (daed:check-true (daed:k-netlist-frozen?)))
+(define ids1 (daed:check-true (daed:k-id-stable?)))
+(define agent-ok (daed:check-true (hash-ref tr "success" #f)))
+(define flash-ok (daed:check-true (hash-ref tr "flash_intact" #f)))
+(define k1-live (hash-ref (daed:k-query-binding "k1") "value" ""))
+(define k1-changed (daed:check-true (equal? k1-live "node-aggregate")))
+
+; Fill-order change must be observable (checksum after K1 rebind).
+(define fill-ok (daed:check-true (daed:k-fill-changed?)))
+
+; ngspice RMSE ruler (educational, 5 % of 5 V)
+(define rmse (daed:k-ref-rmse))
+(define rmse-ok (daed:check-true (and (number? rmse) (< rmse 0.25))))
+
+(display "rmse=")
+(display rmse)
+(display " k1=")
+(display k1-live)
+(newline)
+
+; Persist audit + agent trace
+(define w-audit (write-file "examples/32-live-kernel-tran/out/audit.tsv"
+                            "ok"))
+; rewrite with real audit
+(define w-audit2 (daed:k-audit-write! "examples/32-live-kernel-tran/out/audit.tsv"))
+(define w-ok (daed:check-true (and w-audit2 (>= (daed:k-audit-n) 3))))
+
+(display "audit n=")
+(display (daed:k-audit-n))
+(display " pid-stable=")
+(display pid-ok)
+(display " frozen=")
+(display frozen1)
+(newline)
+
+(define esc-ok (daed:check-eq (daed:escape-count) 0))
+
+(define all-ok
+  (and ver-ok topo boot-ok
+       bad-a-ok k3-still bad-h-ok bad-nl-ok frozen0
+       cyc-ok ids-ok
+       k3-mut world-ok k3-back
+       t-ok pid-ok hot-ok div-ok frozen1 ids1
+       tt-ok agent-ok flash-ok k1-changed fill-ok rmse-ok w-ok esc-ok
+       (= (daed:stats-ref "correctness_fail") 0)))
+
+(if all-ok
+  (begin
+    (display "PASS: live kernel hot-swap during .tran (escapes=0)")
+    (newline)
+    (display "RESULT pass example=32-live-kernel-tran escapes=0")
+    (newline))
+  (begin
+    (display "FAIL: live kernel hot-swap denseness probe")
+    (newline)
+    (display "RESULT fail example=32-live-kernel-tran")
+    (newline)
+    (display "  t-ok=")
+    (display t-ok)
+    (display " pid-ok=")
+    (display pid-ok)
+    (display " hot-ok=")
+    (display hot-ok)
+    (display " div-ok=")
+    (display div-ok)
+    (display " tt-ok=")
+    (display tt-ok)
+    (display " world-ok=")
+    (display world-ok)
+    (display " rmse-ok=")
+    (display rmse-ok)
+    (display " agent-ok=")
+    (display agent-ok)
+    (display " flash-ok=")
+    (display flash-ok)
+    (display " esc-ok=")
+    (display esc-ok)
+    (newline)))
